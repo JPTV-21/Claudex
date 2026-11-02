@@ -9,8 +9,9 @@
 </p>
 
 <p align="center">
-  <strong>Portable</strong>, keyboard-first launcher for Claude Code — one
-  self-contained folder with an isolated <code>CLAUDE_CONFIG_DIR</code>.
+  <strong>Portable</strong> and deeply customizable, keyboard-first launcher
+  for Claude Code — one self-contained folder with an isolated
+  <code>CLAUDE_CONFIG_DIR</code>.
 </p>
 
 <p align="center">
@@ -30,6 +31,17 @@
 The launcher itself is a single FTXUI executable. It works on Windows, macOS,
 and Linux. The source chooses the right executable name and layout for the host
 platform automatically.
+
+## Highlights
+
+- **Truly portable Claude Code**: one self-contained folder with an isolated
+  `CLAUDE_CONFIG_DIR`, temporary folder, and config. Move or copy the whole
+  folder to a USB drive or another machine and keep your setup intact.
+- **Deeply customizable**: almost the entire UI comes from JSON themes. Page
+  layouts are built from blocks (`hbox`/`vbox`/`box`), and inline or whole-row
+  markup controls colors; custom project actions, key bindings, status
+  messages, borders, and separators are all theme fields. You can even rebuild
+  the main screen as a Claude Code-style welcome page.
 
 ## Main menu
 

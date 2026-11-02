@@ -9,8 +9,8 @@
 </p>
 
 <p align="center">
-  <strong>便携</strong>、键盘优先的 Claude Code 启动器——单个自包含文件夹，
-  配备独立的 <code>CLAUDE_CONFIG_DIR</code>。
+  <strong>便携</strong>且高度可定制、键盘优先的 Claude Code 启动器——单个
+  自包含文件夹，配备独立的 <code>CLAUDE_CONFIG_DIR</code>。
 </p>
 
 <p align="center">
@@ -30,6 +30,16 @@
 源码会自动为主机平台选择正确的可执行文件名和目录布局。
 
 > 界面截图中显示的是默认主题的英文文本；界面语言由主题文件决定。
+
+## 重点特性
+
+- **真正便携的 Claude Code**：单个自包含文件夹，内置独立的
+  `CLAUDE_CONFIG_DIR`、临时目录和配置。把整个文件夹移动到 U 盘或另一台
+  机器，配置和项目列表都保持不变。
+- **极强的个性化**：几乎整个界面都由 JSON 主题驱动。页面布局由块
+  （`hbox`/`vbox`/`box`）自由组合，内联与整行 markup 控制颜色；自定义
+  项目动作、按键绑定、状态消息、边框和分隔线全都是主题字段。甚至可以把
+  主界面重建成 Claude Code 风格的欢迎页。
 
 ## 主菜单
 
