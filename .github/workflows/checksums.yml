@@ -22,7 +22,7 @@ jobs:
       - name: Download release assets
         run: |
           mkdir -p assets
-          gh release download "$TAG" --dir assets --pattern 'ClaudeX-*'
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir assets --pattern 'ClaudeX-*'
           cd assets
           sha256sum ClaudeX-* > SHASUMS256.txt
           cat SHASUMS256.txt
