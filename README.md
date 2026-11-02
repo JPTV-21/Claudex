@@ -1,4 +1,8 @@
 <p align="center">
+  English | <a href="README.zh-CN.md">简体中文</a>
+</p>
+
+<p align="center">
   <img src="resources/claudex-icon.png" width="112" alt="ClaudeX icon">
 </p>
 
@@ -1016,67 +1020,6 @@ matching name is an error, not a guess.
 Set `claudePath` in the config if Claude lives somewhere else. The `bin/<arch>`
 layout is no longer searched automatically; use
 `"claudePath": "bin/{arch}/claude*"` or add it to the array.
-
-### Downloading Claude binaries
-
-Three standalone console scripts download the native Claude Code binaries from
-the official
-[`anthropics/claude-code`](https://github.com/anthropics/claude-code/releases)
-GitHub releases:
-
-| Script | Platform |
-| --- | --- |
-| `tools/download-claude.bat` | Windows |
-| `tools/download-claude-macos.sh` | macOS |
-| `tools/download-claude-linux.sh` | Linux |
-
-The two shell scripts are the same POSIX script; each auto-detects macOS or
-Linux. All three scripts detect the host platform/architecture, let you pick a
-release (latest by default) and one or more targets, verify the release
-SHA-256, and ask before overwriting an existing binary. The Windows script
-needs Windows 10 1803 or newer (for `curl.exe` and `tar.exe`) and PowerShell;
-the shell scripts need `curl`, `tar`, and `sha256sum`/`shasum`/`openssl`.
-Downloading Windows targets from a Unix host also needs `unzip`, `bsdtar`,
-`python3`, or `7z`. No Node.js runtime is required. SHA-256 is checked against
-the release `SHASUMS256.txt`; the OpenPGP signature is not checked.
-
-```bat
-rem Windows
-tools\download-claude.bat
-tools\download-claude.bat --update
-tools\download-claude.bat --version v2.1.312 --target windows-x64
-tools\download-claude.bat --platform windows,macos --arch x64,arm64 --yes
-```
-
-```bash
-# macOS or Linux
-sh tools/download-claude-macos.sh
-sh tools/download-claude-linux.sh --update
-sh tools/download-claude-linux.sh --version v2.1.312 --target linux-x64
-sh tools/download-claude-linux.sh --list
-```
-
-The platform and architecture are detected automatically. When only the
-detected host target is downloaded, the binary goes to `bin/<arch>/claude[.exe]`
-(for example `bin/x86_64/claude.exe`). When several targets are selected, each
-goes to `bin/<platform>-<arch>/claude[.exe]`. These layouts are not searched
-automatically; point `claudePath` at the binary or a glob, for example
-`"claudePath": "bin/{arch}/claude*"` or
-`"claudePath": ["bin/{arch}/claude*", "bin/{platform}-{arch}/claude*"]`.
-Use `--dest` to write into another launcher folder,
-`--list` to show recent releases, and `--dry-run` to preview the plan.
-
-`windows`, `macos`, and `linux` are supported on `x64` and `arm64`, including
-the Linux `musl` variants. By default, a musl binary downloaded outside the
-detected host layout is written to `bin/linux-<arch>-musl/`; set `claudePath`
-if the launcher should use that file explicitly. Use `--target` with
-`linux-x64-musl` or `linux-arm64-musl` to request a musl build when selecting
-targets by platform and architecture.
-
-The scripts download through the GitHub API asset endpoint and fall back to
-the release download URLs. `GITHUB_TOKEN`/`GH_TOKEN` raises the API rate limit;
-the shell scripts use `HTTPS_PROXY`/`HTTP_PROXY` automatically through curl,
-while PowerShell uses the Windows proxy settings.
 
 ### Launch command
 
