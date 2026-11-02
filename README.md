@@ -148,67 +148,15 @@ executable is self-contained; no installer is required.
 
 ### One-step portable setup
 
-`setup-portable.sh` prepares ClaudeX and Claude Code in the folder it lives in:
-it downloads the matching release, fetches the Claude Code binary, writes
-`claudex-config.json`, and points the config at `./data` and `./bin`. Run it
-from a new, empty folder, because that folder becomes the portable root.
+The setup scripts live in a separate repository:
+**[JPTV-21/claude-code-portable](https://github.com/JPTV-21/claude-code-portable)**.
 
-Linux and macOS:
-
-```bash
-sh setup-portable.sh
-```
-
-Windows (no Git required):
-
-```powershell
-.\setup-portable.ps1
-```
-
-The PowerShell version uses Windows' bundled `curl.exe` and `Expand-Archive`;
-it does not need Git Bash, perl, or any other external tool. If the execution
-policy blocks local scripts, run it with
-`powershell -ExecutionPolicy Bypass -File .\setup-portable.ps1` or set
-`Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` once.
-
-Both setup scripts ask before installing:
-
-- **Platform and architecture** — detected values are shown as defaults, so you
-  can also download a build for another machine (`windows`, `macos`, `linux`;
-  `x64` or `arm64`), or enter `all` to fetch all six combinations.
-- **Install directory** — defaults to the script's folder. If the path does not
-  exist, the script asks whether to create it.
-- **Download progress** — a live meter with transferred/total size and speed.
-
-With `all`, each target gets its own self-contained folder, so launchers never
-overwrite each other:
-
-```text
-ClaudeXAll/
-  windows-x64/      ClaudeX.exe, claudex-config.json, data/, bin/x64/windows/
-  windows-arm64/    ClaudeX.exe, claudex-config.json, data/, bin/arm64/windows/
-  macos-x64/        ClaudeX,     claudex-config.json, data/, bin/x64/macos/
-  macos-arm64/      ClaudeX,     claudex-config.json, data/, bin/arm64/macos/
-  linux-x64/        ClaudeX,     claudex-config.json, data/, bin/x64/linux/
-  linux-arm64/      ClaudeX,     claudex-config.json, data/, bin/arm64/linux/
-```
-
-For unattended runs, pass `-Yes` (PowerShell) or `--yes` (sh), plus
-`-InstallDir DIR` / `--install-dir DIR`, `-Platform` / `--platform`,
-`-Architecture` / `--arch`, and `-All` / `--all`.
-
-Windows with Git for Windows: keep `setup-portable.bat` next to the script and
-run it from PowerShell, cmd, or by double-clicking:
-
-```powershell
-.\setup-portable.bat
-```
-
-The `.bat` locates Git for Windows' `bash.exe` and runs the POSIX script.
-Common options: `-NoClaude`, `-NoClaudex`, `-Update`, `-Platform`,
-`-Architecture`, `-InstallDir`, and `-All` (PowerShell); the sh script uses
-`--no-claude`, `--no-claudex`, `--update`, `--platform`, `--arch`,
-`--install-dir`, and `--all`. Run with `-Help` / `--help` for the full list.
+They download the matching ClaudeX release, fetch the Claude Code binary, and
+write a portable `claudex-config.json`. Windows can use `setup-portable.ps1`
+(no Git required) or `setup-portable.bat`; Linux and macOS use
+`setup-portable.sh`. See that repository's README for the interactive prompts
+(platform, architecture, install directory), the `all` layout, and unattended
+options.
 
 ## Portable configuration
 
