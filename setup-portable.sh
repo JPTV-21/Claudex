@@ -47,7 +47,7 @@ export LC_ALL=C
 # 也可以直接发布裸二进制，例如 ClaudeX.exe / ClaudeX-linux-x64。
 # 压缩包内应包含名为 ClaudeX / ClaudeX.exe（大小写不敏感）的可执行文件；
 # 如果压缩包内只有一个其它名字的可执行文件，脚本也会采用它。
-CLAUDEX_REPO_PLACEHOLDER="YOUR_GITHUB_USER/claudex"
+CLAUDEX_REPO_PLACEHOLDER="JPTV-21/Claudex"
 CLAUDEX_REPO=${CLAUDEX_REPO:-$CLAUDEX_REPO_PLACEHOLDER}
 CLAUDE_REPO=${CLAUDE_REPO:-anthropics/claude-code}
 

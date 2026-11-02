@@ -1,7 +1,21 @@
-# ClaudeX
+<p align="center">
+  <img src="resources/claudex-icon.png" width="112" alt="ClaudeX icon">
+</p>
 
-A small, keyboard-first launcher for running Claude Code in the right project
-folder with an isolated, portable `CLAUDE_CONFIG_DIR`.
+<h1 align="center">ClaudeX</h1>
+
+<p align="center">
+  A small, keyboard-first launcher for running Claude Code in the right
+  project folder with an isolated, portable <code>CLAUDE_CONFIG_DIR</code>.
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
+  <img alt="Platforms: Windows, macOS, Linux" src="https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux-2ea44f.svg">
+  <img alt="Architectures: x64, arm64" src="https://img.shields.io/badge/arch-x64%20%7C%20arm64-555.svg">
+</p>
+
+![ClaudeX main menu](docs/screenshots/main-menu.png)
 
 The launcher itself is a single FTXUI executable. It works on Windows, macOS,
 and Linux. The source chooses the right executable name and layout for the host
@@ -993,8 +1007,9 @@ detected host target is downloaded, the binary goes to `bin/<arch>/claude[.exe]`
 (for example `bin/x86_64/claude.exe`). When several targets are selected, each
 goes to `bin/<platform>-<arch>/claude[.exe]`. These layouts are not searched
 automatically; point `claudePath` at the binary or a glob, for example
-`"claudePath": "bin/{arch}/claude*"` or `"claudePath": ["bin/{arch}/claude*",
-"bin/{platform}-{arch}/claude*"]`. Use `--dest` to write into another launcher folder,
+`"claudePath": "bin/{arch}/claude*"` or
+`"claudePath": ["bin/{arch}/claude*", "bin/{platform}-{arch}/claude*"]`.
+Use `--dest` to write into another launcher folder,
 `--list` to show recent releases, and `--dry-run` to preview the plan.
 
 `windows`, `macos`, and `linux` are supported on `x64` and `arm64`, including
