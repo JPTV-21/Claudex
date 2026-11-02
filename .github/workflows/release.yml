@@ -113,6 +113,12 @@ jobs:
           path: artifacts
           merge-multiple: true
 
+      - name: Generate checksums
+        run: |
+          cd artifacts
+          sha256sum ClaudeX-* > SHASUMS256.txt
+          cat SHASUMS256.txt
+
       - name: List assets
         run: ls -lh artifacts
 

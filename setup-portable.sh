@@ -513,52 +513,67 @@ setup_work() {
 # ---------------------------------------------------------------------------
 
 download_plain() {
-    url=$1
-    dest=$2
-    label=$3
-    api_mode=${4:-0}
-    err_file="$WORK/curl.err"
+    dl_url=$1
+    dl_dest=$2
+    dl_label=$3
+    dl_api_mode=${4:-0}
+    dl_err_file="$WORK/curl.err"
+    dl_attempt=1
+    dl_max_attempts=3
 
-    set -- -fL -sS --retry 2 --retry-delay 1 --connect-timeout 30 \
-        --speed-limit 1024 --speed-time 60
-    if [ -t 2 ]; then
-        set -- "$@" --progress-bar
-    fi
-    set -- "$@" -H "User-Agent: $USER_AGENT" -o "$dest" -w '%{url_effective}'
-    if [ "$api_mode" = "1" ]; then
-        set -- "$@" -H "Accept: application/octet-stream"
-        if [ -n "$TOKEN" ]; then
-            set -- "$@" -H "Authorization: Bearer $TOKEN"
+    while [ "$dl_attempt" -le "$dl_max_attempts" ]; do
+        set -- -fL -sS --retry 2 --retry-delay 1 --connect-timeout 30 \
+            --speed-limit 1024 --speed-time 120 -C -
+        if [ -t 2 ]; then
+            set -- "$@" --progress-bar
         fi
-    fi
-    set -- "$@" "$url"
+        set -- "$@" -H "User-Agent: $USER_AGENT" -o "$dl_dest" -w '%{url_effective}'
+        if [ "$dl_api_mode" = "1" ]; then
+            set -- "$@" -H "Accept: application/octet-stream"
+            if [ -n "$TOKEN" ]; then
+                set -- "$@" -H "Authorization: Bearer $TOKEN"
+            fi
+        fi
+        set -- "$@" "$dl_url"
 
-    DOWNLOAD_EFFECTIVE_URL=$("$CURL" "$@" 2>"$err_file")
-    rc=$?
-    if [ "$rc" -ne 0 ]; then
-        rm -f "$dest"
-        detail=$(tail -n 1 "$err_file" 2>/dev/null | tr -d '\r')
-        warn "$label 下载失败${detail:+：$detail}"
-        return 1
-    fi
-    return 0
+        DOWNLOAD_EFFECTIVE_URL=$("$CURL" "$@" 2>"$dl_err_file")
+        dl_rc=$?
+        if [ "$dl_rc" -eq 0 ]; then
+            return 0
+        fi
+        # curl 33: the server does not support byte ranges. Restart cleanly.
+        if [ "$dl_rc" -eq 33 ]; then
+            rm -f "$dl_dest"
+        fi
+        if [ "$dl_attempt" -lt "$dl_max_attempts" ]; then
+            warn "$dl_label 下载中断（尝试 $dl_attempt/$dl_max_attempts），2 秒后继续…"
+            sleep 2
+        fi
+        dl_attempt=$((dl_attempt + 1))
+    done
+
+    rm -f "$dl_dest"
+    dl_detail=$(tail -n 1 "$dl_err_file" 2>/dev/null | tr -d '\r')
+    warn "$dl_label 下载失败${dl_detail:+：$dl_detail}"
+    return 1
 }
 
 download_release_asset() {
-    label=$1
-    dest="$WORK/$ASSET_NAME"
+    dl_label=$1
+    dl_dest="$WORK/$ASSET_NAME"
 
     if [ -n "$ASSET_BROWSER_URL" ]; then
-        if download_plain "$ASSET_BROWSER_URL" "$dest" "$label" 0; then
+        if download_plain "$ASSET_BROWSER_URL" "$dl_dest" "$dl_label" 0; then
             return 0
         fi
+        warn "$dl_label: 直链下载失败，改用 GitHub API 重试。"
     fi
     if [ -n "$ASSET_API_URL" ]; then
-        if download_plain "$ASSET_API_URL" "$dest" "$label" 1; then
+        if download_plain "$ASSET_API_URL" "$dl_dest" "$dl_label" 1; then
             return 0
         fi
     fi
-    warn "$label: 下载失败。"
+    warn "$dl_label: 下载失败。"
     return 1
 }
 
@@ -801,6 +816,11 @@ verify_download() {
     file=$3
     asset=$4
     repo=$5
+
+    if [ ! -s "$file" ]; then
+        err "$label: 下载文件缺失或为空，安装已中止。"
+        return 1
+    fi
 
     if [ -z "$SHA256_CMD" ]; then
         warn "$label: 没有可用的 SHA-256 工具，跳过校验。"
@@ -1053,7 +1073,7 @@ marker_value() {
 install_component_from_release() {
     label=$1
     kind=$2
-    dest=$3
+    install_dest=$3
     marker=$4
     repo=$5
 
@@ -1065,7 +1085,10 @@ install_component_from_release() {
     mkdir -p "$extract_dir" || return 1
 
     info "下载 $label $RELEASE_TAG（$ASSET_NAME）"
-    download_release_asset "$label" || return 1
+    download_release_asset "$label" || {
+        err "$label: 下载失败，安装已中止。"
+        return 1
+    }
 
     verify_download "$label" "$VERIFY_REF" "$archive" "$ASSET_NAME" "$repo" || return 1
 
@@ -1075,8 +1098,8 @@ install_component_from_release() {
         warn "$label: 压缩包中找不到可执行文件。"
         return 1
     }
-    install_binary "$bin" "$dest" || {
-        warn "$label: 安装到 $dest 失败。"
+    install_binary "$bin" "$install_dest" || {
+        warn "$label: 安装到 $install_dest 失败。"
         return 1
     }
 
@@ -1100,7 +1123,7 @@ install_component_from_release() {
             "sha256=$sha" || warn "$label: 无法写入版本标记。"
     fi
 
-    ok "$label 已安装：$dest"
+    ok "$label 已安装：$install_dest"
     return 0
 }
 

@@ -153,16 +153,28 @@ Linux and macOS:
 sh setup-portable.sh
 ```
 
-Windows: keep `setup-portable.bat` next to the script and run it from
-PowerShell, cmd, or by double-clicking:
+Windows (no Git required):
+
+```powershell
+.\setup-portable.ps1
+```
+
+The PowerShell version uses Windows' bundled `curl.exe` and `Expand-Archive`;
+it does not need Git Bash, perl, or any other external tool. If the execution
+policy blocks local scripts, run it with
+`powershell -ExecutionPolicy Bypass -File .\setup-portable.ps1` or set
+`Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` once.
+
+Windows with Git for Windows: keep `setup-portable.bat` next to the script and
+run it from PowerShell, cmd, or by double-clicking:
 
 ```powershell
 .\setup-portable.bat
 ```
 
-The `.bat` locates Git for Windows' `bash.exe` and runs the same POSIX script,
-so Git for Windows is required. Useful options: `--no-claude`,
-`--no-claudex`, `--update`, `--timeout SECONDS`, and `--help`.
+The `.bat` locates Git for Windows' `bash.exe` and runs the POSIX script.
+Useful options: `-NoClaude` / `-NoClaudex` / `-Update` (PowerShell) or
+`--no-claude` / `--no-claudex` / `--update` (sh), plus `-Help` / `--help`.
 
 ## Portable configuration
 
