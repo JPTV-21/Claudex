@@ -1,0 +1,35 @@
+name: Release checksums
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (for example v1.0.0)'
+        required: true
+        default: v1.0.0
+
+permissions:
+  contents: write
+
+jobs:
+  checksums:
+    name: Add SHASUMS256.txt
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ inputs.tag }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Download release assets
+        run: |
+          mkdir -p assets
+          gh release download "$TAG" --dir assets --pattern 'ClaudeX-*'
+          cd assets
+          sha256sum ClaudeX-* > SHASUMS256.txt
+          cat SHASUMS256.txt
+
+      - name: Upload checksums
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          files: assets/SHASUMS256.txt
+          fail_on_unmatched_files: true
