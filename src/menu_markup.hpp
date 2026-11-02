@@ -41,6 +41,26 @@ struct MenuMarkupFrame {
     std::optional<ftxui::Color> color;
 };
 
+// Style carried by a `<line ...>` directive. Unlike the inline tags, a line
+// directive applies to the whole row: `bg=` paints the row's full width, and
+// the other attributes fill in defaults for text that does not set its own.
+struct MenuLineStyle {
+    std::optional<ftxui::Color> foreground;
+    std::optional<ftxui::Color> background;
+    bool bold = false;
+    bool dim = false;
+    bool italic = false;
+    bool underline = false;
+    bool inverted = false;
+};
+
+// Finds the first `<line ...>` directive in |text| and parses it. Returns
+// nullopt when the line has no directive, or when any part of one is invalid
+// (bad attribute name, unknown color), in which case it stays literal text.
+std::optional<MenuLineStyle> parseMenuLineStyle(
+    const std::string& text,
+    const std::map<std::string, std::string>* variables = nullptr);
+
 std::optional<MenuMarkupFrame> parseMenuMarkupTag(
     const std::string& raw, const std::map<std::string, std::string>* variables);
 bool markupTagsMatch(const MenuMarkupFrame& open, const MenuMarkupFrame& close);

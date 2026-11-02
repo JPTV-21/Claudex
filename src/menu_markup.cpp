@@ -95,7 +95,93 @@ std::optional<Color> parseBackgroundTag(
     return parseThemeColor(rest, colors);
 }
 
+// `<line bg=green fg=black bold>`: the directive name must be followed by
+// whitespace, so a theme variable that happens to be named "line" keeps
+// working as an ordinary color tag.
+std::optional<MenuLineStyle> parseMenuLineDirective(
+    const std::string& raw,
+    const std::map<std::string, std::string>* colors) {
+    const std::string body = trim(raw);
+    if (body.size() <= 4 || lowerAscii(body.substr(0, 4)) != "line" ||
+        !isAsciiSpace(body[4])) {
+        return std::nullopt;
+    }
+
+    MenuLineStyle style;
+    bool any = false;
+    std::istringstream stream(body.substr(4));
+    std::string token;
+    while (stream >> token) {
+        const std::size_t equals = token.find('=');
+        if (equals == std::string::npos) {
+            const std::string key = normalizeMenuToken(token);
+            if (key == "bold" || key == "b") {
+                style.bold = true;
+            } else if (key == "dim") {
+                style.dim = true;
+            } else if (key == "italic" || key == "i") {
+                style.italic = true;
+            } else if (key == "underline" || key == "underlined" ||
+                       key == "u") {
+                style.underline = true;
+            } else if (key == "inverted" || key == "inverse") {
+                style.inverted = true;
+            } else {
+                return std::nullopt;
+            }
+            any = true;
+            continue;
+        }
+
+        const std::string key = normalizeMenuToken(token.substr(0, equals));
+        const auto color = parseThemeColor(token.substr(equals + 1), colors);
+        if (!color) {
+            return std::nullopt;
+        }
+        if (key == "bg" || key == "background" || key == "on") {
+            style.background = color;
+        } else if (key == "fg" || key == "foreground" || key == "color") {
+            style.foreground = color;
+        } else {
+            return std::nullopt;
+        }
+        any = true;
+    }
+
+    if (!any) {
+        return std::nullopt;
+    }
+    return style;
+}
+
+bool isLineClosingTag(const std::string& body) {
+    return normalizeMenuToken(body) == "line";
+}
+
 }  // namespace
+
+std::optional<MenuLineStyle> parseMenuLineStyle(
+    const std::string& text,
+    const std::map<std::string, std::string>* variables) {
+    for (std::size_t i = 0; i < text.size();) {
+        const std::size_t open = text.find('<', i);
+        if (open == std::string::npos) {
+            break;
+        }
+        const std::size_t close = text.find('>', open + 1);
+        if (close == std::string::npos) {
+            break;
+        }
+        const std::string raw = text.substr(open + 1, close - open - 1);
+        if (!raw.empty() && raw.front() != '/') {
+            if (auto style = parseMenuLineDirective(raw, variables)) {
+                return style;
+            }
+        }
+        i = close + 1;
+    }
+    return std::nullopt;
+}
 
 std::optional<MenuMarkupFrame> parseMenuMarkupTag(
     const std::string& raw,
@@ -265,10 +351,16 @@ void truncateSegments(std::vector<MarkupSegment>& segments, int maxWidth) {
     segments = std::move(kept);
 }
 
-std::vector<MarkupSegment> parseMenuMarkupSegments(
+struct ParsedMenuMarkup {
+    std::vector<MarkupSegment> segments;
+    std::optional<MenuLineStyle> line;
+};
+
+ParsedMenuMarkup parseMenuMarkupSegments(
     const std::string& text,
     const std::map<std::string, std::string>* variables) {
-    std::vector<MarkupSegment> segments;
+    ParsedMenuMarkup parsed;
+    std::vector<MarkupSegment>& segments = parsed.segments;
     std::string current;
     std::vector<MenuMarkupFrame> stack;
 
@@ -318,6 +410,23 @@ std::vector<MarkupSegment> parseMenuMarkupSegments(
                 const std::string body =
                     closing ? raw.substr(1) : raw;
 
+                if (!closing) {
+                    if (auto style = parseMenuLineDirective(body, variables)) {
+                        // The first directive wins, matching
+                        // parseMenuLineStyle().
+                        if (!parsed.line) {
+                            parsed.line = style;
+                        }
+                        i = close + 1;
+                        continue;
+                    }
+                } else if (parsed.line && isLineClosingTag(body)) {
+                    // `</line>` is optional; accept it so a closed directive
+                    // does not leak into the visible text.
+                    i = close + 1;
+                    continue;
+                }
+
                 if (auto frame = parseMenuMarkupTag(body, variables)) {
                     if (closing) {
                         std::size_t match = stack.size();
@@ -351,7 +460,25 @@ std::vector<MarkupSegment> parseMenuMarkupSegments(
         ++i;
     }
     flush();
-    return segments;
+
+    if (parsed.line) {
+        for (MarkupSegment& segment : parsed.segments) {
+            if (parsed.line->foreground && !segment.foreground) {
+                segment.foreground = parsed.line->foreground;
+            }
+            if (parsed.line->background && !segment.background) {
+                segment.background = parsed.line->background;
+            }
+            segment.boldText = segment.boldText || parsed.line->bold;
+            segment.dimText = segment.dimText || parsed.line->dim;
+            segment.italicText = segment.italicText || parsed.line->italic;
+            segment.underlineText =
+                segment.underlineText || parsed.line->underline;
+            segment.invertedText =
+                segment.invertedText || parsed.line->inverted;
+        }
+    }
+    return parsed;
 }
 
 std::string truncatePlainText(const std::string& text, int maxWidth) {
@@ -368,6 +495,24 @@ std::string truncatePlainText(const std::string& text, int maxWidth) {
         result += kept.text;
     }
     return result;
+}
+
+// A `<line ...>` row paints beyond the text: the trailing filler lets the
+// background reach the row's full allotted width, including the prefix and any
+// padding the menu reserves. The foreground is applied here as well so the
+// prefix is colored too; inline tags inside the label still override it.
+Element paintLineStyle(Element element, const MenuLineStyle* style) {
+    if (style == nullptr) {
+        return element;
+    }
+    if (style->foreground) {
+        element = element | color(*style->foreground);
+    }
+    if (style->background) {
+        element = hbox({std::move(element), filler()}) |
+                  bgcolor(*style->background);
+    }
+    return element;
 }
 
 Element renderSegments(std::vector<MarkupSegment>& segments) {
@@ -390,17 +535,16 @@ Element renderSegments(std::vector<MarkupSegment>& segments) {
 Element renderMenuMarkup(const std::string& text,
                          const std::map<std::string, std::string>* variables,
                          int maxWidth) {
-    std::vector<MarkupSegment> segments =
-        parseMenuMarkupSegments(text, variables);
-    truncateSegments(segments, maxWidth);
-    return renderSegments(segments);
+    ParsedMenuMarkup parsed = parseMenuMarkupSegments(text, variables);
+    truncateSegments(parsed.segments, maxWidth);
+    return renderSegments(parsed.segments);
 }
 
 int menuMarkupDisplayWidth(const std::string& text,
                            const std::map<std::string, std::string>* variables) {
     int width = 0;
     for (const MarkupSegment& segment :
-         parseMenuMarkupSegments(text, variables)) {
+         parseMenuMarkupSegments(text, variables).segments) {
         width += segmentWidth(segment);
     }
     return width;
@@ -684,6 +828,11 @@ Element styleMenuEntry(
             : ftxui::text(truncatePlainText(label, labelWidth));
     Element element = hbox({std::move(prefixElement),
                             std::move(labelElement)});
+    if (labelHasMarkup) {
+        if (auto line = parseMenuLineStyle(label, variables)) {
+            element = paintLineStyle(std::move(element), &*line);
+        }
+    }
     if (active && inverseHighlight) {
         element = element | inverted;
     }
@@ -739,17 +888,24 @@ Element styleMenuEntryLines(
             labelHasMarkup
                 ? renderMenuMarkup(lines[i], variables, labelWidth)
                 : ftxui::text(truncatePlainText(lines[i], labelWidth));
+        Element row;
         if (i == 0) {
-            rows.push_back(hbox({renderMenuMarkup(prefix, variables),
-                                 std::move(label)}));
+            row = hbox({renderMenuMarkup(prefix, variables),
+                        std::move(label)});
         } else {
             // Continuation lines line up under the label, not the cursor.
-            rows.push_back(hbox(
+            row = hbox(
                 {ftxui::text(std::string(static_cast<std::size_t>(
                                             std::max(0, prefixWidth)),
                                         ' ')),
-                 std::move(label)}));
+                 std::move(label)});
         }
+        if (labelHasMarkup) {
+            if (auto line = parseMenuLineStyle(lines[i], variables)) {
+                row = paintLineStyle(std::move(row), &*line);
+            }
+        }
+        rows.push_back(std::move(row));
     }
 
     Element element =

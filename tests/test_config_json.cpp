@@ -143,6 +143,30 @@ TEST_CASE("config/actionsFromJson label fallbacks and filtering") {
     CHECK(actionsFromJson(json::object(), labels).empty());
 }
 
+TEST_CASE("config/actionsFromJson folds legacy rename into edit") {
+    ProjectMenuTheme labels;
+    labels.editLabel = "Edit project";
+    labels.renameLabel = "Rename";
+
+    const json duplicate = json::array({
+        {{"id", "edit"}},
+        {{"id", "rename"}},
+        {{"id", "back"}},
+    });
+    const std::vector<MenuAction> deduped =
+        actionsFromJson(duplicate, labels);
+    REQUIRE(deduped.size() == 2);
+    CHECK_EQ(deduped[0].id, "edit");
+    CHECK_EQ(deduped[1].id, "back");
+
+    // A theme that only lists rename still gets a working edit action.
+    const std::vector<MenuAction> migrated = actionsFromJson(
+        json::array({{{"id", "rename"}}}), labels);
+    REQUIRE(migrated.size() == 1);
+    CHECK_EQ(migrated[0].id, "edit");
+    CHECK_EQ(migrated[0].label, "Edit project");
+}
+
 // --- launch command and settings -------------------------------------------
 
 TEST_CASE("config/updateLaunchCommand from a string") {

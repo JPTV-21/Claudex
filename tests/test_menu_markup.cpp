@@ -475,3 +475,94 @@ TEST_CASE("markup/styleMenuEntry can render markup labels") {
                                         "  ", false, nullptr)),
              "  <red>x</red>");
 }
+
+// --- line directives -----------------------------------------------------------
+
+TEST_CASE("markup/parseMenuLineStyle reads attributes") {
+    const auto& palette = testfw::defaultPalette();
+    auto style =
+        parseMenuLineStyle("<line bg=green fg=white bold>text", &palette);
+    REQUIRE(style.has_value());
+    CHECK(style->background == Color(0, 170, 0));
+    CHECK(style->foreground == Color(255, 255, 255));
+    CHECK(style->bold);
+    CHECK_FALSE(style->dim);
+}
+
+TEST_CASE("markup/parseMenuLineStyle accepts aliases") {
+    const auto& palette = testfw::defaultPalette();
+    auto style = parseMenuLineStyle(
+        "<Line background=red color=black underline inverted>", &palette);
+    REQUIRE(style.has_value());
+    CHECK(style->background == Color(204, 0, 0));
+    CHECK(style->foreground == Color(0, 0, 0));
+    CHECK(style->underline);
+    CHECK(style->inverted);
+    // A bare <line> stays an ordinary color tag, not a directive.
+    CHECK_FALSE(parseMenuLineStyle("<line>x</line>", &palette).has_value());
+    CHECK_FALSE(parseMenuLineStyle("<line>", &palette).has_value());
+}
+
+TEST_CASE("markup/an invalid line directive stays literal") {
+    const auto& palette = testfw::defaultPalette();
+    const std::string badColor = "<line bg=notacolor>x";
+    CHECK_FALSE(parseMenuLineStyle(badColor, &palette).has_value());
+    CHECK_EQ(renderPlain(markup(badColor, &palette)), badColor);
+    const std::string badKey = "<line sparkle>x";
+    CHECK_FALSE(parseMenuLineStyle(badKey, &palette).has_value());
+    CHECK_EQ(renderPlain(markup(badKey, &palette)), badKey);
+}
+
+TEST_CASE("markup/line directives take no width") {
+    const auto& palette = testfw::defaultPalette();
+    CHECK_EQ(renderPlain(markup("<line bg=green>abc", &palette)), "abc");
+    CHECK_EQ(renderPlain(markup("<line bg=green>abc</line>", &palette)),
+             "abc");
+    CHECK_EQ(menuMarkupDisplayWidth("<line bg=green>abc", &palette), 3);
+    CHECK_EQ(menuMarkupDisplayWidth("<line bg=green>abc</line>", &palette), 3);
+}
+
+TEST_CASE("markup/a line background fills the whole row") {
+    const auto& palette = testfw::defaultPalette();
+    const ftxui::EntryState state{"", false, false, false, 0};
+    ftxui::Element element = styleMenuEntryLines(
+        state, {"<line bg=green>item"}, true, false, "> ", "  ", false,
+        &palette, 10);
+    ftxui::Screen screen = ftxui::Screen::Create(
+        ftxui::Dimension::Fixed(10), ftxui::Dimension::Fixed(1));
+    ftxui::Render(screen, element);
+    for (int x = 0; x < 10; ++x) {
+        CHECK(screen.PixelAt(x, 0).background_color == Color(0, 170, 0));
+    }
+    CHECK_EQ(screen.PixelAt(0, 0).character, " ");
+    CHECK_EQ(screen.PixelAt(2, 0).character, "i");
+    CHECK_EQ(screen.PixelAt(5, 0).character, "m");
+}
+
+TEST_CASE("markup/a line background does not leak into other rows") {
+    const auto& palette = testfw::defaultPalette();
+    const ftxui::EntryState state{"", false, false, false, 0};
+    ftxui::Element element = styleMenuEntryLines(
+        state, {"<line bg=green>one", "two"}, true, false, "> ", "  ", false,
+        &palette, 10);
+    ftxui::Screen screen = ftxui::Screen::Create(
+        ftxui::Dimension::Fixed(10), ftxui::Dimension::Fixed(2));
+    ftxui::Render(screen, element);
+    for (int x = 0; x < 10; ++x) {
+        CHECK(screen.PixelAt(x, 0).background_color == Color(0, 170, 0));
+        CHECK(screen.PixelAt(x, 1).background_color == Color());
+    }
+}
+
+TEST_CASE("markup/inline tags override a line foreground") {
+    const auto& palette = testfw::defaultPalette();
+    ftxui::Element element = renderMenuMarkup(
+        "<line fg=green><red>ab</red>cd", &palette);
+    ftxui::Screen screen = ftxui::Screen::Create(
+        ftxui::Dimension::Fixed(4), ftxui::Dimension::Fixed(1));
+    ftxui::Render(screen, element);
+    CHECK(screen.PixelAt(0, 0).foreground_color == Color(204, 0, 0));
+    CHECK(screen.PixelAt(1, 0).foreground_color == Color(204, 0, 0));
+    CHECK(screen.PixelAt(2, 0).foreground_color == Color(0, 170, 0));
+    CHECK(screen.PixelAt(3, 0).foreground_color == Color(0, 170, 0));
+}

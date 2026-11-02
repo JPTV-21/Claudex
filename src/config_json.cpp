@@ -81,12 +81,30 @@ std::vector<MenuAction> actionsFromJson(const json& array,
         return actions;
     }
 
+    // The old "rename" action opened the name-only view of the edit screen.
+    // Edit project now covers the same screen with both fields, so drop the
+    // duplicate. A theme that only lists rename keeps a working edit action.
+    bool hasEditAction = false;
+    for (const json& item : array) {
+        if (item.is_object() &&
+            lowerAscii(trim(jsonStringField(item, "id", ""))) == "edit") {
+            hasEditAction = true;
+            break;
+        }
+    }
+
     for (const json& item : array) {
         if (!item.is_object()) {
             continue;
         }
         MenuAction action;
         action.id = lowerAscii(trim(jsonStringField(item, "id", "")));
+        if (action.id == "rename") {
+            if (hasEditAction) {
+                continue;
+            }
+            action.id = "edit";
+        }
         action.command = jsonStringField(item, "command", "");
         action.label = jsonStringField(item, "label", "");
         if (action.label.empty()) {

@@ -54,13 +54,13 @@ Recent
   selection but draw it with the inactive prefix.
 - `+ Add project` is always the last row and can be reached with the arrow keys.
 - The add/edit screen has two fields: the optional project name and the folder
-  path. `Up`/`Down` move between the fields in the order they are drawn (and
-  first walk the wrapped lines of a multi-line value); `Tab`/`Shift+Tab` cycle
-  through them. Enter saves and Esc cancels. `Shift+Enter` inserts a line break
-  in any input field without submitting. The name is markup, so a project can
-  carry its own color. `E` → `Edit project` opens both fields; `E` → `Rename`
-  opens the same screen with the path shown read-only, so the name is the only
-  focus target.
+  path. Arrow keys move to the input the theme actually draws in that
+  direction; `Up`/`Down` first walk the wrapped lines of a multi-line value.
+  `Tab`/`Shift+Tab` cycle through the inputs in layout order. Enter saves and
+  Esc cancels. `Shift+Enter` inserts a line break in any input field without
+  submitting. The name is markup, so a project can carry its own color.
+  `E` → `Edit project` opens both fields; the old separate `Rename` action was
+  removed because it edited the same screen.
 - The input placeholders come from the theme's `pathPlaceholder` (default
   `{drive}/Projects/my-project`, so it follows the launcher's drive) and
   `projectNamePlaceholder`.
@@ -78,7 +78,7 @@ Other keys:
 | `Shift+Enter` | Insert a line break in the focused input instead of submitting (`Alt+Enter` works where the terminal does not report Shift+Enter) |
 | `Tab` / `Shift+Tab` | Cycle focus between sections in the order they appear in the layout |
 | `Up` / `Down` | Move inside the focused section; at its first/last row, move to the adjacent section |
-| `Left` / `Right` | Move within a grid row; on a single-column list they change sections. In the quick-launch field they move the text cursor, and only at the ends do they change sections |
+| `Left` / `Right` | Move within a grid row; on a single-column list they change sections. In the quick-launch and path-screen inputs they move the text cursor, and only at its edges do they move to the input/section drawn in that direction |
 | `Enter` (quick launch) | Launch Claude once in the typed folder |
 | `Esc` (quick launch) | Leave the input without quitting |
 | `E` or `F2` | Open the selected project's action menu |
@@ -453,6 +453,18 @@ Supported tags:
   values, and palette indexes as foreground tags.
 - Styles: `<bold>`/`<b>`, `<dim>`, `<italic>`/`<i>`,
   `<underline>`/`<underlined>`/`<u>`, `<inverted>`/`<inverse>`
+- Line directives: `<line ...>` styles a whole menu row instead of only the
+  tagged text. `bg=` (also `background=` or `on=`) paints the background
+  across the row width, including the prefix and the padding after the text;
+  `fg=` (also `foreground=` or `color=`) sets the default text color; the
+  style names above can be combined as bare words. For example
+  `<line bg=#102030 fg=white bold>` gives a row a colored band. The directive
+  applies to the entire line, `</line>` is optional, and inline tags still win
+  on the text they cover. In a plain text block (title, footer, status) the
+  color covers the text itself; menu rows and grid cells are filled to their
+  full width. An invalid attribute or unknown color leaves the directive as
+  literal text; a bare `<line>` is still an ordinary color tag for a theme
+  variable named `line`.
 
 Tags can be nested and must be closed on the same line. Unknown tags remain
 literal text, so ordinary project paths containing `<` or `>` are not harmed.
@@ -506,7 +518,7 @@ Screen names: `main`, `path`, `confirmCreate`, `projectActions`,
 | `border` | `none`, `theme` (use `borderStyle`/`borderCharacters`), a named style (`light`, `dashed`, `heavy`, `double`, `rounded`, `empty`), or custom glyphs. |
 | `width` | Maximum page width; `0` means unlimited. |
 | `align` | `left`, `center`, or `right`. |
-| `addTitle` / `editTitle` / `renameTitle` | Text for `{mode}` on the path screen. `renameTitle` falls back to `editTitle`. |
+| `addTitle` / `editTitle` | Text for `{mode}` on the path screen. |
 
 Blocks:
 
@@ -593,7 +605,7 @@ All screen text is expanded with the usual placeholders plus:
 | Placeholder | Value |
 | --- | --- |
 | `{path}` | Current path field, pending folder, or target project, depending on the screen. |
-| `{mode}` | `addTitle`, `editTitle` or `renameTitle` on the path screen. |
+| `{mode}` | `addTitle` or `editTitle` on the path screen. |
 | `{error}` | Current path error, if any. |
 | `{status}` | Current status message. |
 | `{theme}` | Theme file path (`disabled` when empty). |
@@ -704,7 +716,6 @@ prefixes, and inverse highlight:
   "projectFormat": "<muted><project></muted>",
   "launchLabel": "<success>Launch Claude</success>",
   "editLabel": "Edit project",
-  "renameLabel": "Rename",
   "removeLabel": "Remove from list",
   "backLabel": "Back",
   "moveUpLabel": "Move up",
@@ -721,7 +732,7 @@ prefixes, and inverse highlight:
 | --- | --- |
 | `titleFormat` | Action menu title text. Empty hides it. |
 | `projectFormat` | Project path line. Use `<project>` or `{project}`. Empty hides it. |
-| `launchLabel` / `editLabel` / `renameLabel` / `removeLabel` / `backLabel` | Default action labels. `edit` opens both fields (name and path); `rename` edits the name only. |
+| `launchLabel` / `editLabel` / `removeLabel` / `backLabel` | Default action labels. `edit` opens both fields (name and path). Older themes that still list a `rename` action get it folded into `edit` (or converted to it when no `edit` action exists); `renameLabel` is then ignored. |
 | `moveUpLabel` / `moveDownLabel` / `moveTopLabel` / `moveBottomLabel` | Default labels for the four move actions. |
 | `actions` | Full action list, including custom shell commands; see [Custom project actions](#custom-project-actions). |
 | `footerLines` | Action menu footer lines. Empty hides them. |
@@ -750,8 +761,8 @@ instead:
 
 | Field | Meaning |
 | --- | --- |
-| `id` | `launch`, `edit`, `rename`, `moveUp`, `moveDown`, `moveTop`, `moveBottom`, `remove`, `back`, or any custom name. |
-| `label` | Row label; markup is allowed. Built-in ids fall back to `launchLabel`, `editLabel`, `renameLabel`, the matching move label, `removeLabel`, and `backLabel` when empty. |
+| `id` | `launch`, `edit`, `moveUp`, `moveDown`, `moveTop`, `moveBottom`, `remove`, `back`, or any custom name. A legacy `rename` id is treated as `edit` and skipped when `edit` is already listed. |
+| `label` | Row label; markup is allowed. Built-in ids fall back to `launchLabel`, `editLabel`, the matching move label, `removeLabel`, and `backLabel` when empty. |
 | `command` | Shell command run in the project folder. Overrides `id`. |
 
 Commands run through `cmd.exe /d /s /c` on Windows and `/bin/sh -c`
@@ -852,7 +863,6 @@ Project list and path entry:
 | `selectProjectFirst` | — | An action needs a selected project. |
 | `projectAdded` | — | A project was added and saved. |
 | `projectPathUpdated` | — | A project path was edited and saved. |
-| `projectNameUpdated` | — | A project name was renamed and saved. |
 | `projectRemoved` | — | A project was removed and the config was saved. |
 | `projectAddedSaveFailed` | `{error}` | A project was added but the config could not be saved. |
 | `projectUnavailable` | — | The project selected for launching disappeared. |

@@ -334,11 +334,9 @@ int main(int argc, char** argv) {
     int pathCursor = 0;
     int nameCursor = 0;
     // Index into pathFieldOrder: the name and path inputs in the order the
-    // theme draws them. Rename makes the path read-only, so it leaves the
-    // focus order there.
+    // theme draws them.
     int pathFocus = 0;
-    bool pathFieldFocusable = true;
-    enum class PathMode { Add, Edit, Rename };
+    enum class PathMode { Add, Edit };
     PathMode pathMode = PathMode::Add;
     int pathEditIndex = -1;
     fs::path pendingPath;
@@ -358,6 +356,10 @@ int main(int argc, char** argv) {
     Box projectListBox = kEmptyHitBox;
     Box recentListBox = kEmptyHitBox;
     Box quickInputBox = kEmptyHitBox;
+    // Path screen input boxes, refreshed on every draw so focus movement uses
+    // the positions the theme actually produced.
+    Box nameFieldBox = kEmptyHitBox;
+    Box pathFieldBox = kEmptyHitBox;
     std::string quickInput;
     int quickInputCursor = 0;
     fs::path pendingLaunchPath;
@@ -790,7 +792,6 @@ int main(int argc, char** argv) {
         projectName.clear();
         pathCursor = 0;
         nameCursor = 0;
-        pathFieldFocusable = true;
         pathFocus = std::max(0, pathFieldIndex(PathField::Path));
         pathError.clear();
         pendingPath.clear();
@@ -825,10 +826,7 @@ int main(int argc, char** argv) {
         projectName = project.name;
         pathCursor = static_cast<int>(pathInput.size());
         nameCursor = static_cast<int>(projectName.size());
-        pathFieldFocusable = mode != PathMode::Rename;
-        const int preferredField = pathFieldIndex(
-            mode == PathMode::Rename ? PathField::Name : PathField::Path);
-        pathFocus = std::max(0, preferredField);
+        pathFocus = std::max(0, pathFieldIndex(PathField::Path));
         pathError.clear();
         pendingPath.clear();
         updatePathPlaceholder();
@@ -929,35 +927,8 @@ int main(int argc, char** argv) {
         }
     };
 
-    // Rename only touches the name: the path is shown read-only and is not
-    // resolved again.
-    auto commitRename = [&]() {
-        if (pathEditIndex < 0 ||
-            pathEditIndex >= static_cast<int>(config.projects.size())) {
-            pathError = messageText(config.menuTheme,
-                                    "projectNoLongerListed");
-            switchPage(Page::Path);
-            return;
-        }
-        config.projects[static_cast<std::size_t>(pathEditIndex)].name =
-            trim(projectName);
-        if (!saveConfigWithStatus(
-                messageText(config.menuTheme, "projectNameUpdated"))) {
-            pathError = statusMessage;
-            switchPage(Page::Path);
-            return;
-        }
-        refreshMenu();
-        mainSelected = pathEditIndex;
-        switchPage(Page::Main);
-    };
-
     auto submitPath = [&]() {
         pathError.clear();
-        if (pathMode == PathMode::Rename) {
-            commitRename();
-            return;
-        }
         const std::string entered = trim(pathInput);
         if (entered.empty()) {
             pathError = messageText(config.menuTheme, "enterFolderPath");
@@ -1349,15 +1320,13 @@ int main(int argc, char** argv) {
         Input(&projectName, &projectNamePlaceholder, nameInputOptions);
 
     // Both fields share the path page. Build the container in the authored
-    // block order so Up/Down and Tab move in the direction the fields are
-    // drawn. A block the theme leaves out is not focusable, and Rename wraps
-    // the path input in Maybe so its read-only text cannot take the focus.
-    auto pathFocusComponent = Maybe(pathInputComponent, &pathFieldFocusable);
+    // block order; arrows use the reflected boxes below, so the movement
+    // follows the positions the theme actually drew.
     Components pathFieldComponents;
     for (const PathField field : pathFieldOrder) {
         pathFieldComponents.push_back(field == PathField::Name
                                           ? nameInputComponent
-                                          : pathFocusComponent);
+                                          : pathInputComponent);
     }
     auto pathFields =
         Container::Vertical(pathFieldComponents, &pathFocus);
@@ -1466,25 +1435,18 @@ int main(int argc, char** argv) {
         BlockRenderContext context;
         context.config = &config;
         context.theme = &config.menuTheme;
-        if (pathMode == PathMode::Add) {
-            context.modeText = screen.addTitle;
-        } else if (pathMode == PathMode::Rename) {
-            context.modeText = screen.renameTitle.empty() ? screen.editTitle
-                                                          : screen.renameTitle;
-        } else {
-            context.modeText = screen.editTitle;
-        }
+        context.modeText = pathMode == PathMode::Add ? screen.addTitle
+                                                     : screen.editTitle;
         context.pathText = pathInput;
         context.projectName = projectName;
         context.errorText = pathError;
-        // Rename shows the path but does not let it be edited.
         context.pathInput =
-            pathMode == PathMode::Rename
-                ? hbox({text(" "), text(pathInput)})
-                : hbox({text(" "), pathInputComponent->Render() | flex});
+            hbox({text(" "), pathInputComponent->Render() | flex}) |
+            reflect(pathFieldBox);
         context.hasPathInput = true;
         context.projectNameInput =
-            hbox({text(" "), nameInputComponent->Render() | flex});
+            hbox({text(" "), nameInputComponent->Render() | flex}) |
+            reflect(nameFieldBox);
         context.hasProjectNameInput = true;
         context.dialogButtons = dialogBar.render(config.menuTheme);
         context.hasDialogButtons = true;
@@ -1848,8 +1810,6 @@ int main(int argc, char** argv) {
             requestLaunch();
         } else if (action.id == "edit") {
             beginEditProject(PathMode::Edit);
-        } else if (action.id == "rename") {
-            beginEditProject(PathMode::Rename);
         } else if (action.id == "moveup") {
             moveProject(-1, false);
         } else if (action.id == "movedown") {
@@ -1872,10 +1832,6 @@ int main(int argc, char** argv) {
             pathFocus, 0, static_cast<int>(pathFieldOrder.size()) - 1);
         return pathFieldOrder[static_cast<std::size_t>(index)];
     };
-    auto pathFieldSelectable = [&](PathField field) {
-        // Rename shows the path read-only, so it is not a focus target.
-        return field == PathField::Name || pathFieldFocusable;
-    };
     // Moves the path-screen focus one field in the authored layout order.
     auto movePathField = [&](int step, bool wrap) -> bool {
         const int count = static_cast<int>(pathFieldOrder.size());
@@ -1883,20 +1839,39 @@ int main(int argc, char** argv) {
             return false;
         }
         int index = std::clamp(pathFocus, 0, count - 1);
-        for (int attempt = 0; attempt < count; ++attempt) {
-            index += step;
-            if (wrap) {
-                index = (index % count + count) % count;
-            } else if (index < 0 || index >= count) {
-                return false;
-            }
-            if (pathFieldSelectable(
-                    pathFieldOrder[static_cast<std::size_t>(index)])) {
-                pathFocus = index;
-                return true;
-            }
+        index += step;
+        if (wrap) {
+            index = (index % count + count) % count;
+        } else if (index < 0 || index >= count) {
+            return false;
         }
-        return false;
+        pathFocus = index;
+        return true;
+    };
+    // Moves the path-screen focus to the input the theme actually drew in
+    // that direction. Using the reflected boxes keeps the arrows correct for
+    // any block order, nesting, or horizontal arrangement.
+    auto movePathFieldInDirection = [&](NavDir direction) -> bool {
+        const int count = static_cast<int>(pathFieldOrder.size());
+        if (count == 0) {
+            return false;
+        }
+        std::vector<Box> boxes(static_cast<std::size_t>(count),
+                               kEmptyHitBox);
+        for (int i = 0; i < count; ++i) {
+            boxes[static_cast<std::size_t>(i)] =
+                pathFieldOrder[static_cast<std::size_t>(i)] == PathField::Name
+                    ? nameFieldBox
+                    : pathFieldBox;
+        }
+        const int current = std::clamp(pathFocus, 0, count - 1);
+        const int target =
+            nearestBoxInDirection(boxes, current, direction);
+        if (target < 0) {
+            return false;
+        }
+        pathFocus = target;
+        return true;
     };
     // True when the caret has another wrapped line in that direction, in
     // which case the Input should move the cursor instead of the focus.
@@ -1928,12 +1903,10 @@ int main(int argc, char** argv) {
             if (page == Page::Path) {
                 if (pathFieldFocused() == PathField::Name) {
                     insertLineBreak(projectName, nameCursor);
-                    return true;
-                }
-                if (pathFieldFocusable) {
+                } else {
                     insertLineBreak(pathInput, pathCursor);
-                    return true;
                 }
+                return true;
             }
             return false;
         }
@@ -2102,25 +2075,41 @@ int main(int argc, char** argv) {
                 movePathField(-1, true);
                 return true;
             }
-            if (event == Event::ArrowUp || event == Event::ArrowDown ||
-                event == Event::PageUp || event == Event::PageDown) {
-                const bool down = event == Event::ArrowDown ||
-                                  event == Event::PageDown;
+            if (event == Event::ArrowUp || event == Event::ArrowDown) {
+                const bool down = event == Event::ArrowDown;
                 const PathField field = pathFieldFocused();
-                // Page keys never scroll a single field in FTXUI, so they
-                // always move the focus. Arrows stay inside wrapped lines
-                // until the first or last one.
-                const bool arrow =
-                    event == Event::ArrowUp || event == Event::ArrowDown;
-                if (arrow && field == PathField::Name) {
-                    if (cursorHasLine(projectName, nameCursor, down)) {
-                        return false;
-                    }
-                } else if (arrow && pathFieldFocusable &&
-                           cursorHasLine(pathInput, pathCursor, down)) {
+                const std::string& text =
+                    field == PathField::Name ? projectName : pathInput;
+                const int cursor =
+                    field == PathField::Name ? nameCursor : pathCursor;
+                // Stay inside a multi-line value until its first/last line;
+                // only then leave the field.
+                if (cursorHasLine(text, cursor, down)) {
                     return false;
                 }
-                movePathField(down ? +1 : -1, false);
+                movePathFieldInDirection(down ? NavDir::Down : NavDir::Up);
+                return true;
+            }
+            if (event == Event::ArrowLeft || event == Event::ArrowRight) {
+                const bool left = event == Event::ArrowLeft;
+                const PathField field = pathFieldFocused();
+                const std::string& text =
+                    field == PathField::Name ? projectName : pathInput;
+                const int cursor =
+                    field == PathField::Name ? nameCursor : pathCursor;
+                const bool atEdge =
+                    left ? cursor <= 0
+                         : cursor >= static_cast<int>(text.size());
+                if (!atEdge) {
+                    return false;
+                }
+                movePathFieldInDirection(left ? NavDir::Left
+                                              : NavDir::Right);
+                return true;
+            }
+            if (event == Event::PageUp || event == Event::PageDown) {
+                // Page keys do not scroll a single FTXUI field.
+                movePathField(event == Event::PageDown ? +1 : -1, false);
                 return true;
             }
             if (eventMatchesAny(event, config.menuTheme.keys.back)) {

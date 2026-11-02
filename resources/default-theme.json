@@ -277,7 +277,6 @@
     "actions": [
       { "id": "launch" },
       { "id": "edit" },
-      { "id": "rename" },
       { "id": "moveUp" },
       { "id": "moveDown" },
       { "id": "moveTop" },
