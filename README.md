@@ -1163,10 +1163,6 @@ cmake -S . -B build -G "MinGW Makefiles" `
 cmake --build build -j 8
 ```
 
-The included VS Code task `C/C++: Build ClaudeX` runs the configure and build
-steps and writes `build/ClaudeX.exe`. Update the tool paths in
-`.vscode/tasks.json` and `.vscode/c_cpp_properties.json` if the toolchain moves.
-
 On MinGW, the executable is linked statically and can be copied along with a
 `bin/` folder, `claudex-config.json`, `claudex-theme.json`, and `data/` as a
 self-contained launcher.
