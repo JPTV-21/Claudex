@@ -123,6 +123,47 @@ Claudex do not share half of the screen.
 The vendored FTXUI copy has its DECRQSS cursor-shape query disabled because
 unsupported terminals print the query payload (`$q q`) onto the screen.
 
+## Quick start
+
+Download the archive for your platform from the
+[latest release](https://github.com/JPTV-21/Claudex/releases/latest):
+
+| Platform | Asset |
+| --- | --- |
+| Windows x64 | `ClaudeX-windows-x64.zip` |
+| Windows arm64 | `ClaudeX-windows-arm64.zip` |
+| macOS x64 | `ClaudeX-macos-x64.tar.gz` |
+| macOS arm64 | `ClaudeX-macos-arm64.tar.gz` |
+| Linux x64 | `ClaudeX-linux-x64.tar.gz` |
+| Linux arm64 | `ClaudeX-linux-arm64.tar.gz` |
+
+Extract the archive and run `ClaudeX.exe` (`ClaudeX` on macOS/Linux). The
+executable is self-contained; no installer is required.
+
+### One-step portable setup
+
+`setup-portable.sh` prepares ClaudeX and Claude Code in the folder it lives in:
+it downloads the matching release, fetches the Claude Code binary, writes
+`claudex-config.json`, and points the config at `./data` and `./bin`. Run it
+from a new, empty folder, because that folder becomes the portable root.
+
+Linux and macOS:
+
+```bash
+sh setup-portable.sh
+```
+
+Windows: keep `setup-portable.bat` next to the script and run it from
+PowerShell, cmd, or by double-clicking:
+
+```powershell
+.\setup-portable.bat
+```
+
+The `.bat` locates Git for Windows' `bash.exe` and runs the same POSIX script,
+so Git for Windows is required. Useful options: `--no-claude`,
+`--no-claudex`, `--update`, `--timeout SECONDS`, and `--help`.
+
 ## Portable configuration
 
 The launcher config defaults to `./claudex-config.json` and the theme to
