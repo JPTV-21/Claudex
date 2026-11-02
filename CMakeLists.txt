@@ -1,6 +1,14 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(ClaudeX VERSION 1.1.0 LANGUAGES CXX)
+# Keep the executable self-contained instead of requiring the VC++ runtime.
+# This must be set before project() so it applies while the toolchain is
+# initialized.
+if(MSVC)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY
+        "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
+
+project(ClaudeX VERSION 1.1.1 LANGUAGES CXX)
 
 set(CLAUDEX_AUTHOR "Wind_Blood")
 
@@ -14,12 +22,6 @@ endif()
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
-
-if(MSVC)
-    # Keep the executable self-contained instead of requiring the VC++ runtime.
-    set(CMAKE_MSVC_RUNTIME_LIBRARY
-        "MultiThreaded$<$<CONFIG:Debug>:Debug>")
-endif()
 
 if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/ftxui/CMakeLists.txt")
     message(FATAL_ERROR "Missing third_party/ftxui. Restore the bundled dependency.")
@@ -98,6 +100,9 @@ function(claudex_link_static target)
             -static
             -static-libgcc
             -static-libstdc++
+            # Drop the symbol table from release binaries; it is not needed
+            # at runtime and roughly halves the MinGW executable size.
+            $<$<CONFIG:Release>:-s>
         )
     endif()
 endfunction()

@@ -151,7 +151,8 @@ Recent
 | Linux arm64 | `ClaudeX-linux-arm64.tar.gz` |
 
 解压后运行 `ClaudeX.exe`（macOS/Linux 上为 `ClaudeX`）。可执行文件是自包含的，
-不需要安装程序。
+不需要安装程序。Windows 构建会静态链接 C/C++ 运行时，因此不需要安装
+Visual C++ Redistributable。
 
 ### 一步式便携安装
 

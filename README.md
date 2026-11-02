@@ -166,7 +166,9 @@ Download the archive for your platform from the
 | Linux arm64 | `ClaudeX-linux-arm64.tar.gz` |
 
 Extract the archive and run `ClaudeX.exe` (`ClaudeX` on macOS/Linux). The
-executable is self-contained; no installer is required.
+executable is self-contained; no installer is required. The Windows build links
+the C/C++ runtime statically, so it does not need the Visual C++
+Redistributable.
 
 ### One-step portable setup
 
