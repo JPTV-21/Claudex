@@ -5,8 +5,8 @@
 <h1 align="center">ClaudeX</h1>
 
 <p align="center">
-  A small, keyboard-first launcher for running Claude Code in the right
-  project folder with an isolated, portable <code>CLAUDE_CONFIG_DIR</code>.
+  A small, keyboard-first launcher for running **portable** Claude Code in the right
+  project folder with an isolated <code>CLAUDE_CONFIG_DIR</code>.
 </p>
 
 <p align="center">
