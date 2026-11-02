@@ -22,6 +22,11 @@ param(
     [switch]$Update,
     [switch]$NoClaudex,
     [switch]$NoClaude,
+    [ValidateSet('auto', 'windows', 'macos', 'linux')][string]$Platform = 'auto',
+    [ValidateSet('auto', 'x64', 'arm64')][string]$Architecture = 'auto',
+    [string]$InstallDir = '',
+    [switch]$Yes,
+    [switch]$NoProgress,
     [string]$Repo = 'JPTV-21/Claudex',
     [string]$ClaudeRepo = 'anthropics/claude-code',
     [switch]$Help
@@ -46,6 +51,11 @@ function Show-Usage {
   -Update               强制重新下载 ClaudeX 与 Claude Code
   -NoClaudex            跳过 ClaudeX 的下载/更新
   -NoClaude             跳过 Claude Code 的下载/更新
+  -Platform PLATFORM    安装平台：windows/macos/linux（默认检测当前系统）
+  -Architecture ARCH    CPU 架构：x64/arm64（默认检测当前系统）
+  -InstallDir DIR       安装目录（默认脚本所在目录）
+  -Yes                  使用默认值，不进行交互询问
+  -NoProgress           不显示下载进度表
   -Repo OWNER/REPO      指定 ClaudeX 仓库（默认 JPTV-21/Claudex）
   -ClaudeRepo OWNER/REPO
                         指定 Claude Code 仓库（默认 anthropics/claude-code）
@@ -53,9 +63,116 @@ function Show-Usage {
 
 示例:
   .\setup-portable.ps1
-  .\setup-portable.ps1 -NoClaude
-  .\setup-portable.ps1 -Update
+  .\setup-portable.ps1 -InstallDir D:\ClaudexPortable
+  .\setup-portable.ps1 -Platform macos -Architecture arm64
+  .\setup-portable.ps1 -NoClaude -Update -Yes
 '@ | Write-Host
+}
+
+function Read-Choice {
+    param(
+        [Parameter(Mandatory = $true)][string]$Prompt,
+        [Parameter(Mandatory = $true)][string]$Default,
+        [Parameter(Mandatory = $true)][string[]]$Choices
+    )
+
+    while ($true) {
+        $answer = Read-Host "$Prompt [$Default] ($($Choices -join '/'))"
+        if ([string]::IsNullOrWhiteSpace($answer)) { return $Default }
+        foreach ($choice in $Choices) {
+            if ($choice -ieq $answer.Trim()) { return $choice }
+        }
+        Write-Warn "请输入：$($Choices -join ' / ')"
+    }
+}
+
+function Resolve-InstallDir {
+    param([string]$Dir)
+
+    if ([string]::IsNullOrWhiteSpace($Dir)) {
+        $Dir = $script:Root
+    } else {
+        $Dir = [Environment]::ExpandEnvironmentVariables($Dir)
+        if ($Dir -eq '~') {
+            $Dir = $HOME
+        } elseif ($Dir.StartsWith('~\') -or $Dir.StartsWith('~/')) {
+            $Dir = Join-Path $HOME $Dir.Substring(2)
+        }
+        if (-not [System.IO.Path]::IsPathRooted($Dir)) {
+            $Dir = Join-Path (Get-Location).Path $Dir
+        }
+    }
+
+    $Dir = [System.IO.Path]::GetFullPath($Dir)
+    if (-not (Test-Path -LiteralPath $Dir)) {
+        if (-not $script:AssumeYes) {
+            $answer = Read-Host "目录不存在：$Dir`n是否创建？[Y/n]"
+            if ($answer -match '^(n|no)$') { throw '已取消。' }
+        }
+        New-Item -ItemType Directory -Force -Path $Dir | Out-Null
+        Write-Ok "已创建目录：$Dir"
+    }
+    return $Dir
+}
+
+function Get-LauncherExeName {
+    if ($script:TargetPlatform -eq 'windows') { return 'ClaudeX.exe' }
+    return 'ClaudeX'
+}
+
+function Get-ClaudeExeName {
+    if ($script:TargetPlatform -eq 'windows') { return 'claude.exe' }
+    return 'claude'
+}
+
+function Get-ClaudexAssetName {
+    switch ($script:TargetPlatform) {
+        'windows' { return "ClaudeX-windows-$script:TargetArch.zip" }
+        'macos'   { return "ClaudeX-macos-$script:TargetArch.tar.gz" }
+        'linux'   { return "ClaudeX-linux-$script:TargetArch.tar.gz" }
+    }
+}
+
+function Get-ClaudeAssetName {
+    switch ($script:TargetPlatform) {
+        'windows' {
+            if ($script:TargetArch -eq 'arm64') { return 'claude-win32-arm64.zip' }
+            return 'claude-win32-x64.zip'
+        }
+        'macos' { return "claude-darwin-$script:TargetArch.tar.gz" }
+        'linux' { return "claude-linux-$script:TargetArch.tar.gz" }
+    }
+}
+
+function Expand-ReleaseArchive {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Destination
+    )
+
+    if (Test-Path -LiteralPath $Destination) {
+        Remove-Item -LiteralPath $Destination -Recurse -Force
+    }
+    New-Item -ItemType Directory -Force -Path $Destination | Out-Null
+
+    if ($Path -match '\.zip$') {
+        Expand-Archive -LiteralPath $Path -DestinationPath $Destination -Force
+        return
+    }
+    if ($Path -match '\.(tar\.gz|tgz)$') {
+        # Prefer Windows' bundled bsdtar. A GNU tar from Git/MSYS treats
+        # "E:\path" as a remote host and fails.
+        $tarPath = Join-Path $env:SystemRoot 'System32\tar.exe'
+        if (-not (Test-Path -LiteralPath $tarPath)) {
+            $tar = Get-Command tar.exe -ErrorAction SilentlyContinue
+            if (-not $tar) { throw '解压 .tar.gz 需要 tar.exe（Windows 10 自带）。' }
+            $tarPath = $tar.Source
+        }
+        & $tarPath -xzf $Path -C $Destination
+        if ($LASTEXITCODE -ne 0) { throw "解压失败：$Path" }
+        return
+    }
+    throw "不支持的压缩格式：$Path"
 }
 
 function Get-NormalizedArch {
@@ -92,8 +209,10 @@ function Invoke-DownloadWithRetry {
     for ($i = 1; $i -le $Attempts; $i++) {
         try {
             if ($curl) {
-                $curlArgs = @(
-                    '-fL', '-sS',
+                # curl's default meter shows downloaded/total size and speed.
+                $curlArgs = @('-fL')
+                if (-not $script:ShowProgress) { $curlArgs += '-sS' }
+                $curlArgs += @(
                     '--retry', '2', '--retry-delay', '1',
                     '--connect-timeout', '30',
                     '--speed-limit', '1024', '--speed-time', '120',
@@ -232,7 +351,8 @@ function Test-AssetHash {
 }
 
 function Install-ClaudeX {
-    $target = Join-Path $script:Root 'ClaudeX.exe'
+    $exeName = Get-LauncherExeName
+    $target = Join-Path $script:Root $exeName
 
     if ((Test-Path -LiteralPath $target) -and -not $Update) {
         Write-Ok "ClaudeX 已存在，跳过下载（使用 -Update 强制更新）"
@@ -240,7 +360,7 @@ function Install-ClaudeX {
     }
 
     $release = Get-ReleaseInfo -Repository $Repo
-    $assetName = "ClaudeX-windows-$script:Arch.zip"
+    $assetName = Get-ClaudexAssetName
     $asset = Get-ReleaseAsset -Release $release -Name $assetName
     if (-not $asset) { throw "release 中没有 $assetName。" }
 
@@ -253,35 +373,28 @@ function Install-ClaudeX {
     Test-AssetHash -SumsAsset (Get-ReleaseAsset -Release $release -Name 'SHASUMS256.txt') `
         -Asset $assetName -Path $zip
 
-    if (Test-Path -LiteralPath $extractDir) {
-        Remove-Item -LiteralPath $extractDir -Recurse -Force
-    }
-    Expand-Archive -LiteralPath $zip -DestinationPath $extractDir -Force
+    Expand-ReleaseArchive -Path $zip -Destination $extractDir
 
     $exe = Get-ChildItem -LiteralPath $extractDir -Recurse -File |
-        Where-Object { $_.Name -ieq 'ClaudeX.exe' } |
+        Where-Object { $_.Name -ieq $exeName } |
         Select-Object -First 1
-    if (-not $exe) { throw 'ClaudeX 压缩包中找不到 ClaudeX.exe。' }
+    if (-not $exe) { throw "ClaudeX 压缩包中找不到 $exeName。" }
 
     Copy-Item -LiteralPath $exe.FullName -Destination $target -Force
     Write-Ok "ClaudeX 已安装：$target"
 }
 
 function Install-ClaudeCode {
-    $destDir = Join-Path $script:Root "bin\$script:Arch\windows"
-    $dest = Join-Path $destDir 'claude.exe'
+    $exeName = Get-ClaudeExeName
+    $destDir = Join-Path $script:Root ("bin\" + $script:TargetArch + "\" + $script:TargetPlatform)
+    $dest = Join-Path $destDir $exeName
 
     if ((Test-Path -LiteralPath $dest) -and -not $Update) {
         Write-Ok "Claude Code 已存在，跳过下载（使用 -Update 强制更新）"
         return
     }
 
-    $claudeAssetName = if ($script:Arch -eq 'arm64') {
-        'claude-win32-arm64.zip'
-    } else {
-        'claude-win32-x64.zip'
-    }
-
+    $claudeAssetName = Get-ClaudeAssetName
     $release = Get-ReleaseInfo -Repository $ClaudeRepo
     $asset = Get-ReleaseAsset -Release $release -Name $claudeAssetName
     if (-not $asset) { throw "release 中没有 $claudeAssetName。" }
@@ -295,15 +408,12 @@ function Install-ClaudeCode {
     Test-AssetHash -SumsAsset (Get-ReleaseAsset -Release $release -Name 'SHASUMS256.txt') `
         -Asset $claudeAssetName -Path $zip
 
-    if (Test-Path -LiteralPath $extractDir) {
-        Remove-Item -LiteralPath $extractDir -Recurse -Force
-    }
-    Expand-Archive -LiteralPath $zip -DestinationPath $extractDir -Force
+    Expand-ReleaseArchive -Path $zip -Destination $extractDir
 
     $exe = Get-ChildItem -LiteralPath $extractDir -Recurse -File |
-        Where-Object { $_.Name -ieq 'claude.exe' } |
+        Where-Object { $_.Name -ieq $exeName } |
         Select-Object -First 1
-    if (-not $exe) { throw 'Claude Code 压缩包中找不到 claude.exe。' }
+    if (-not $exe) { throw "Claude Code 压缩包中找不到 $exeName。" }
 
     New-Item -ItemType Directory -Force -Path $destDir | Out-Null
     Copy-Item -LiteralPath $exe.FullName -Destination $dest -Force
@@ -312,7 +422,7 @@ function Install-ClaudeCode {
 
 function Write-LauncherConfig {
     $configPath = Join-Path $script:Root 'claudex-config.json'
-    $claudePath = "bin/$script:Arch/windows/claude*"
+    $claudePath = "bin/$script:TargetArch/$script:TargetPlatform/claude*"
 
     $cfg = $null
     if (Test-Path -LiteralPath $configPath) {
@@ -357,19 +467,24 @@ function Write-LauncherConfig {
 }
 
 function Show-Summary {
-    $launcher = Join-Path $script:Root 'ClaudeX.exe'
-    $claude = Join-Path $script:Root "bin\$script:Arch\windows\claude.exe"
+    $launcher = Join-Path $script:Root (Get-LauncherExeName)
+    $claude = Join-Path $script:Root ("bin\" + $script:TargetArch + "\" + $script:TargetPlatform + "\" + (Get-ClaudeExeName))
     $config = Join-Path $script:Root 'claudex-config.json'
 
     Write-Host ''
     Write-Host '================ 完成 ================' -ForegroundColor Green
-    Write-Host "  平台:        Windows $script:Arch"
-    Write-Host "  脚本目录:    $script:Root"
+    Write-Host "  平台:        $script:TargetPlatform $script:TargetArch"
+    Write-Host "  安装目录:    $script:Root"
     Write-Host ('  ClaudeX:     ' + $(if (Test-Path -LiteralPath $launcher) { $launcher } else { '未安装' }))
     Write-Host ('  Claude Code: ' + $(if (Test-Path -LiteralPath $claude) { $claude } else { '未安装' }))
     Write-Host "  配置文件:    $config"
     Write-Host "    claudeConfigDir = data"
-    Write-Host "    claudePath      = bin/$script:Arch/windows/claude*"
+    Write-Host "    claudePath      = bin/$script:TargetArch/$script:TargetPlatform/claude*"
+    if ($script:TargetPlatform -ne 'windows') {
+        Write-Host ''
+        Write-Warn "这是 $script:TargetPlatform $script:TargetArch 版本，不能在本机 Windows 上运行。"
+        return
+    }
     if (Test-Path -LiteralPath $launcher) {
         Write-Host ''
         Write-Host "启动方式：$launcher"
@@ -377,8 +492,11 @@ function Show-Summary {
 }
 
 $script:Root = $null
-$script:Arch = $null
+$script:TargetArch = $null
+$script:TargetPlatform = $null
 $script:WorkDir = $null
+$script:AssumeYes = $false
+$script:ShowProgress = $false
 
 try {
     if ($Help) {
@@ -387,14 +505,44 @@ try {
     }
 
     $script:Root = if ($PSScriptRoot) { $PSScriptRoot } else { (Get-Location).Path }
-    $script:Arch = Get-NormalizedArch
-    $script:WorkDir = Join-Path ([System.IO.Path]::GetTempPath()) ("claudex-setup-" + [guid]::NewGuid().ToString('N').Substring(0, 8))
+    $script:TargetArch = Get-NormalizedArch
+    $script:TargetPlatform = 'windows'
+    $script:AssumeYes = [bool]$Yes
 
+    try { $redirected = [Console]::IsOutputRedirected } catch { $redirected = $true }
+    $script:ShowProgress = (-not $NoProgress) -and (-not $redirected)
+
+    $script:WorkDir = Join-Path ([System.IO.Path]::GetTempPath()) ("claudex-setup-" + [guid]::NewGuid().ToString('N').Substring(0, 8))
     New-Item -ItemType Directory -Force -Path $script:WorkDir | Out-Null
 
+    $interactive = (-not $Yes) -and [Environment]::UserInteractive
+
+    if ($Platform -ne 'auto') {
+        $script:TargetPlatform = $Platform
+    } elseif ($interactive) {
+        $script:TargetPlatform = Read-Choice -Prompt '安装平台' -Default $script:TargetPlatform `
+            -Choices @('windows', 'macos', 'linux')
+    }
+
+    if ($Architecture -ne 'auto') {
+        $script:TargetArch = $Architecture
+    } elseif ($interactive) {
+        $script:TargetArch = Read-Choice -Prompt 'CPU 架构' -Default $script:TargetArch `
+            -Choices @('x64', 'arm64')
+    }
+
+    if ($interactive -and [string]::IsNullOrWhiteSpace($InstallDir)) {
+        $answer = Read-Host "安装目录 [$script:Root]"
+        if (-not [string]::IsNullOrWhiteSpace($answer)) { $InstallDir = $answer }
+    }
+    $script:Root = Resolve-InstallDir -Dir $InstallDir
+
     Write-Host '便携版 Claude Code 一键部署（PowerShell）' -ForegroundColor White
-    Write-Host "  脚本目录: $script:Root"
-    Write-Host "  检测到:   Windows $script:Arch"
+    Write-Host "  安装目录: $script:Root"
+    Write-Host "  目标平台: $script:TargetPlatform $script:TargetArch"
+    if ($script:TargetPlatform -ne 'windows') {
+        Write-Warn '将下载其他平台的二进制文件；它们不能在本机 Windows 上运行。'
+    }
     Write-Host ''
 
     if (-not $NoClaudex) { Install-ClaudeX }

@@ -165,6 +165,19 @@ policy blocks local scripts, run it with
 `powershell -ExecutionPolicy Bypass -File .\setup-portable.ps1` or set
 `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` once.
 
+Both setup scripts ask before installing:
+
+- **Platform and architecture** — detected values are shown as defaults, so you
+  can also download a build for another machine (`windows`, `macos`, `linux`;
+  `x64` or `arm64`).
+- **Install directory** — defaults to the script's folder. If the path does not
+  exist, the script asks whether to create it.
+- **Download progress** — a live meter with transferred/total size and speed.
+
+For unattended runs, pass `-Yes` (PowerShell) or `--yes` (sh), plus
+`-InstallDir DIR` / `--install-dir DIR`, `-Platform` / `--platform`, and
+`-Architecture` / `--arch`.
+
 Windows with Git for Windows: keep `setup-portable.bat` next to the script and
 run it from PowerShell, cmd, or by double-clicking:
 
@@ -173,8 +186,10 @@ run it from PowerShell, cmd, or by double-clicking:
 ```
 
 The `.bat` locates Git for Windows' `bash.exe` and runs the POSIX script.
-Useful options: `-NoClaude` / `-NoClaudex` / `-Update` (PowerShell) or
-`--no-claude` / `--no-claudex` / `--update` (sh), plus `-Help` / `--help`.
+Common options: `-NoClaude`, `-NoClaudex`, `-Update`, `-Platform`,
+`-Architecture`, and `-InstallDir` (PowerShell); the sh script uses
+`--no-claude`, `--no-claudex`, `--update`, `--platform`, `--arch`, and
+`--install-dir`. Run with `-Help` / `--help` for the full list.
 
 ## Portable configuration
 

@@ -72,6 +72,13 @@ FORCE_UPDATE=0
 DO_CLAUDEX=1
 DO_CLAUDE=1
 CLAUDEX_ASSET_OVERRIDE=""
+PLATFORM_OVERRIDE=""
+ARCH_OVERRIDE=""
+INSTALL_DIR_OVERRIDE=""
+ASSUME_YES=0
+INTERACTIVE=0
+DETECTED_OS=""
+DETECTED_ARCH=""
 LAUNCHER_TIMEOUT=20
 
 HARD_FAIL=0
@@ -217,6 +224,10 @@ ClaudeX、data/ 和 bin/ 的根目录。
   -u, --update             强制重新下载最新版 ClaudeX 与 Claude Code
       --no-claudex         跳过 ClaudeX 的下载/更新
       --no-claude          跳过 Claude Code 的下载/更新
+      --platform OS        安装平台：windows/macos/linux（默认检测当前系统）
+      --arch ARCH          CPU 架构：x64/arm64（默认检测当前系统）
+      --install-dir DIR    安装目录（默认脚本所在目录）
+  -y, --yes                使用默认值，不进行交互询问
       --claudex-repo REPO  指定 ClaudeX 仓库（owner/repo）
       --claudex-asset NAME 指定 ClaudeX release 中的资产文件名
       --claude-repo REPO   指定 Claude Code 仓库
@@ -239,8 +250,9 @@ ClaudeX、data/ 和 bin/ 的根目录。
 示例:
   sh setup-portable.sh
   bash setup-portable.sh --update
+  bash setup-portable.sh --install-dir /opt/claudex --yes
+  bash setup-portable.sh --platform macos --arch arm64
   bash setup-portable.sh --claudex-repo owner/claudex
-  sh setup-portable.sh --no-claude
 EOF
 }
 
@@ -281,6 +293,33 @@ parse_args() {
                 ;;
             --no-claude)
                 DO_CLAUDE=0
+                ;;
+            -y|--yes)
+                ASSUME_YES=1
+                ;;
+            --platform)
+                [ "$#" -ge 2 ] || usage_error "--platform 需要一个平台名"
+                PLATFORM_OVERRIDE=$2
+                shift
+                ;;
+            --platform=*)
+                PLATFORM_OVERRIDE=${1#*=}
+                ;;
+            --arch)
+                [ "$#" -ge 2 ] || usage_error "--arch 需要一个架构名"
+                ARCH_OVERRIDE=$2
+                shift
+                ;;
+            --arch=*)
+                ARCH_OVERRIDE=${1#*=}
+                ;;
+            --install-dir)
+                [ "$#" -ge 2 ] || usage_error "--install-dir 需要一个目录"
+                INSTALL_DIR_OVERRIDE=$2
+                shift
+                ;;
+            --install-dir=*)
+                INSTALL_DIR_OVERRIDE=${1#*=}
                 ;;
             --claudex-repo)
                 [ "$#" -ge 2 ] || usage_error "--claudex-repo 需要一个 owner/repo 参数"
@@ -409,6 +448,15 @@ detect_platform() {
         done
     fi
 
+    DETECTED_OS=$OS
+    DETECTED_ARCH=$ARCH
+    apply_platform_vars
+}
+
+# Recompute every path after the interactive platform/arch/directory choices.
+apply_platform_vars() {
+    [ "$OS" = "linux" ] || LIBC="glibc"
+
     case "$OS" in
         windows)
             PLATFORM_LABEL="Windows"
@@ -433,6 +481,82 @@ detect_platform() {
     CLAUDEX_BIN="$ROOT/$CLAUDEX_EXE"
     CLAUDEX_MARKER="$ROOT/.claudex-version"
     CLAUDE_PATH_CONFIG="bin/$ARCH/$OS/claude*"
+    CONFIG_FILE="$ROOT/$CONFIG_NAME"
+    DATA_DIR="$ROOT/data"
+    PORTABLE_TEMP_DIR="$ROOT/data/tmp"
+}
+
+prompt_platform_arch() {
+    INTERACTIVE=0
+    if [ -t 0 ] && [ "$ASSUME_YES" -eq 0 ]; then
+        INTERACTIVE=1
+    fi
+
+    [ -z "$PLATFORM_OVERRIDE" ] || OS=$PLATFORM_OVERRIDE
+    [ -z "$ARCH_OVERRIDE" ] || ARCH=$ARCH_OVERRIDE
+
+    if [ "$INTERACTIVE" -eq 1 ]; then
+        printf '安装平台 [%s] (windows/macos/linux): ' "$OS"
+        read answer || answer=""
+        case "$answer" in
+            "") ;;
+            windows|macos|linux) OS=$answer ;;
+            *) warn "无效平台：$answer，使用 $OS" ;;
+        esac
+
+        printf 'CPU 架构 [%s] (x64/arm64): ' "$ARCH"
+        read answer || answer=""
+        case "$answer" in
+            "") ;;
+            x64|arm64) ARCH=$answer ;;
+            *) warn "无效架构：$answer，使用 $ARCH" ;;
+        esac
+    fi
+
+    case "$OS" in
+        windows|macos|linux) ;;
+        *) die "不支持的平台：$OS" ;;
+    esac
+    case "$ARCH" in
+        x64|arm64) ;;
+        *) die "不支持的架构：$ARCH" ;;
+    esac
+
+    if [ "$OS" != "$DETECTED_OS" ] || [ "$ARCH" != "$DETECTED_ARCH" ]; then
+        info "将下载 $OS/$ARCH 版本（不会在本机运行）。"
+    fi
+}
+
+prompt_install_dir() {
+    if [ -n "$INSTALL_DIR_OVERRIDE" ]; then
+        ROOT=$INSTALL_DIR_OVERRIDE
+    elif [ "$INTERACTIVE" -eq 1 ]; then
+        printf '安装目录 [%s]: ' "$ROOT"
+        read answer || answer=""
+        [ -z "$answer" ] || ROOT=$answer
+    fi
+
+    case "$ROOT" in
+        "~") ROOT=$HOME ;;
+        "~/"*) ROOT="$HOME/${ROOT#\~/}" ;;
+    esac
+    case "$ROOT" in
+        /*|[A-Za-z]:*) ;;
+        *) ROOT="$PWD/$ROOT" ;;
+    esac
+
+    if [ ! -d "$ROOT" ]; then
+        if [ "$INTERACTIVE" -eq 1 ]; then
+            printf '目录不存在：%s\n是否创建？[Y/n]: ' "$ROOT"
+            read answer || answer=""
+            case "$answer" in
+                n|N|no|NO) die "已取消。" ;;
+            esac
+        fi
+        mkdir -p "$ROOT" || die "无法创建目录：$ROOT"
+        ok "已创建目录：$ROOT"
+    fi
+    [ -w "$ROOT" ] || die "目录不可写：$ROOT"
 }
 
 select_claude_asset_name() {
@@ -522,10 +646,14 @@ download_plain() {
     dl_max_attempts=3
 
     while [ "$dl_attempt" -le "$dl_max_attempts" ]; do
-        set -- -fL -sS --retry 2 --retry-delay 1 --connect-timeout 30 \
-            --speed-limit 1024 --speed-time 120 -C -
+        # On a terminal, leave curl's default progress meter enabled. It shows
+        # the transferred/total size and the average speed.
         if [ -t 2 ]; then
-            set -- "$@" --progress-bar
+            set -- -fL --retry 2 --retry-delay 1 --connect-timeout 30 \
+                --speed-limit 1024 --speed-time 120 -C -
+        else
+            set -- -fL -sS --retry 2 --retry-delay 1 --connect-timeout 30 \
+                --speed-limit 1024 --speed-time 120 -C -
         fi
         set -- "$@" -H "User-Agent: $USER_AGENT" -o "$dl_dest" -w '%{url_effective}'
         if [ "$dl_api_mode" = "1" ]; then
@@ -536,7 +664,11 @@ download_plain() {
         fi
         set -- "$@" "$dl_url"
 
-        DOWNLOAD_EFFECTIVE_URL=$("$CURL" "$@" 2>"$dl_err_file")
+        if [ -t 2 ]; then
+            DOWNLOAD_EFFECTIVE_URL=$("$CURL" "$@")
+        else
+            DOWNLOAD_EFFECTIVE_URL=$("$CURL" "$@" 2>"$dl_err_file")
+        fi
         dl_rc=$?
         if [ "$dl_rc" -eq 0 ]; then
             return 0
@@ -1626,6 +1758,9 @@ print_summary() {
 main() {
     parse_args "$@"
     detect_platform
+    prompt_platform_arch
+    prompt_install_dir
+    apply_platform_vars
     select_claude_asset_name
     check_dependencies
     setup_work
