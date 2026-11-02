@@ -1,0 +1,12 @@
+/build/
+/build-*/
+/bin/
+/data/
+/claudex-config.json
+/claudex-config.json.invalid
+/claudex-config.json.tmp
+/claudex-config.json.before-fix
+/claudex.log
+CMakeUserPresets.json
+/backup/
+.claude/settings.local.json

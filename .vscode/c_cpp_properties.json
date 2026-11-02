@@ -1,0 +1,23 @@
+{
+    "configurations": [
+        {
+            "name": "MinGW x86",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "${workspaceFolder}/third_party",
+                "${workspaceFolder}/third_party/ftxui/include",
+                "${workspaceFolder}/build/generated"
+            ],
+            "defines": [
+                "_DEBUG",
+                "WIN32",
+                "_WIN32"
+            ],
+            "compilerPath": "E:/!Softwares/basic/mingw32/bin/g++.exe",
+            "cStandard": "c17",
+            "cppStandard": "c++20",
+            "intelliSenseMode": "windows-gcc-x86"
+        }
+    ],
+    "version": 4
+}

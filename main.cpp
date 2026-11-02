@@ -1,0 +1,2190 @@
+#include "claude_finder.hpp"
+#include "config_json.hpp"
+#include "config_manager.hpp"
+#include "grid_menu.hpp"
+#include "key_events.hpp"
+#include "launcher.hpp"
+#include "menu_markup.hpp"
+#include "path_resolver.hpp"
+#include "platform.hpp"
+#include "screens.hpp"
+#include "text_util.hpp"
+
+#include <ftxui/component/component.hpp>
+#include <ftxui/component/component_options.hpp>
+#include <ftxui/component/event.hpp>
+#include <ftxui/component/screen_interactive.hpp>
+#include <ftxui/dom/elements.hpp>
+#include <ftxui/dom/node.hpp>
+
+#include <algorithm>
+#include <chrono>
+#include <cstdlib>
+#include <functional>
+#include <iostream>
+#include <map>
+#include <optional>
+#include <string>
+#include <utility>
+#include <vector>
+
+using namespace ftxui;
+using namespace claudex;
+
+#if defined(__MINGW32__)
+// MinGW's startup code can glob wildcard arguments before main(). The
+// launcher expands wildcards itself, so keep argv exactly as typed.
+int _dowildcard = 0;
+#endif
+
+// ---------------------------------------------------------------------------
+// User interface
+// ---------------------------------------------------------------------------
+
+// Focus targets on the main page. The authored block order decides how they
+// are traversed, so the constants only identify the components.
+constexpr int kMainFocusProjects = 0;
+constexpr int kMainFocusRecent = 1;
+constexpr int kMainFocusQuickInput = 2;
+
+void collectMainFocusOrder(const json& blocks, std::vector<int>& order) {
+    if (!blocks.is_array()) {
+        return;
+    }
+    for (const json& block : blocks) {
+        if (!block.is_object()) {
+            continue;
+        }
+        const std::string type =
+            normalizeMenuToken(jsonStringField(block, "type", ""));
+        int node = -1;
+        if (type == "projectlist") {
+            node = kMainFocusProjects;
+        } else if (type == "recentlist") {
+            node = kMainFocusRecent;
+        } else if (type == "quickinput") {
+            node = kMainFocusQuickInput;
+        }
+        if (node >= 0 &&
+            std::find(order.begin(), order.end(), node) == order.end()) {
+            order.push_back(node);
+        }
+        if (block.contains("children") && block["children"].is_array()) {
+            collectMainFocusOrder(block["children"], order);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Shared mouse hit-testing
+//
+// Every clickable row stores the Box it was drawn into. reflect() refreshes
+// those boxes on each draw, and the root event handler maps mouse coordinates
+// back to rows with the helpers below. The main lists, the project action list
+// and the dialog buttons all use the same mechanism.
+// ---------------------------------------------------------------------------
+
+const Box kEmptyHitBox{1, 0, 1, 0};
+
+int mouseRowAt(const std::vector<Box>& boxes, const Mouse& mouse) {
+    for (int row = 0; row < static_cast<int>(boxes.size()); ++row) {
+        const Box& box = boxes[static_cast<std::size_t>(row)];
+        if (!box.IsEmpty() && box.Contain(mouse.x, mouse.y)) {
+            return row;
+        }
+    }
+    return -1;
+}
+
+bool mouseInside(const Box& box, const Mouse& mouse) {
+    return !box.IsEmpty() && box.Contain(mouse.x, mouse.y);
+}
+
+// A horizontal row of clickable labels. The labels are markup, hovered buttons
+// invert, and a left click runs the matching callback. Keyboard shortcuts are
+// handled separately by the page handlers, so the bar stays mouse-only.
+struct DialogButtonBar {
+    std::vector<std::string> labels;
+    std::vector<Box> boxes;
+    int hovered = -1;
+    std::function<void(int)> on_click;
+
+    void set(std::vector<std::string> newLabels,
+             std::function<void(int)> click) {
+        labels = std::move(newLabels);
+        on_click = std::move(click);
+        boxes.assign(labels.size(), kEmptyHitBox);
+        hovered = -1;
+    }
+
+    void clear() {
+        labels.clear();
+        boxes.clear();
+        hovered = -1;
+        on_click = nullptr;
+    }
+
+    Element render(const MenuTheme& theme) {
+        Elements row;
+        for (int i = 0; i < static_cast<int>(labels.size()); ++i) {
+            if (i != 0) {
+                row.push_back(text("   "));
+            }
+            Element button = renderMenuMarkup(
+                labels[static_cast<std::size_t>(i)], &theme.variables);
+            if (i == hovered) {
+                button = button | inverted;
+            }
+            button = button | reflect(boxes[static_cast<std::size_t>(i)]);
+            row.push_back(std::move(button));
+        }
+        return hbox(std::move(row)) | hcenter;
+    }
+
+    bool handle(Event& event) {
+        if (!event.is_mouse()) {
+            return false;
+        }
+        const Mouse& mouse = event.mouse();
+        const int row = mouseRowAt(boxes, mouse);
+        if (mouse.button == Mouse::None && mouse.motion == Mouse::Moved) {
+            if (row != hovered) {
+                hovered = row;
+                return true;
+            }
+            return false;
+        }
+        if (mouse.button == Mouse::Left && mouse.motion == Mouse::Pressed) {
+            if (row >= 0 && on_click) {
+                // Keep the callback alive even if the action switches pages
+                // and replaces this bar's callback.
+                auto click = on_click;
+                click(row);
+                return true;
+            }
+            return false;
+        }
+        return false;
+    }
+};
+
+int main(int argc, char** argv) {
+    const fs::path executableDir = executableDirectory(
+        argc > 0 ? argv[0] : nullptr);
+    const PathResolver pathResolver(executableDir);
+    auto resolveConfigPath = [&](const std::string& raw) {
+        std::error_code ec;
+        fs::path cwd = fs::current_path(ec);
+        if (ec) {
+            cwd = executableDir;
+        }
+        PathResolution resolution = pathResolver.resolveWithBase(
+            raw, cwd, PathKind::File, MultiMatchPolicy::FirstSorted);
+        if (resolution.resolved) {
+            return resolution.path;
+        }
+        // Keep the literal pattern so the config load error names it.
+        fs::path literal = pathFromUtf8(resolution.expanded);
+        if (literal.is_relative()) {
+            literal = fs::absolute(literal, ec);
+        }
+        return literal;
+    };
+
+    fs::path configFile = executableDir / kDefaultConfigFile;
+    bool whereClaude = false;
+    if (auto environmentConfig = getEnvUtf8("CLAUDEX_CONFIG");
+        environmentConfig && !environmentConfig->empty()) {
+        configFile = resolveConfigPath(*environmentConfig);
+    }
+
+    for (int i = 1; i < argc; ++i) {
+        const std::string argument = argv[i];
+        if (argument == "--config" || argument == "-c") {
+            if (i + 1 >= argc) {
+                std::cerr << "Missing value after " << argument << ".\n";
+                return 2;
+            }
+            configFile = resolveConfigPath(argv[++i]);
+        } else if (argument == "--where-claude") {
+            whereClaude = true;
+        } else if (argument == "--help" || argument == "-h") {
+            std::cout
+                << "ClaudeX - portable Claude Code launcher\n\n"
+                << "Usage: " << (argc > 0 ? argv[0] : "ClaudeX")
+                << " [--config PATH] [--where-claude]\n\n"
+                << "Controls (defaults; rebind in claudex-theme.json):\n"
+                << "  Up/Down     move inside a section; at its edge, switch "
+                   "sections\n"
+                << "  Enter       launch in the selected project, or start in "
+                   "the typed quick-launch folder once\n"
+                << "  E / F2      open the selected project's action menu\n"
+                << "  Delete      remove the selected project\n"
+                << "  A           add a project\n"
+                << "  Tab         switch sections in layout order\n"
+                << "  Esc         leave the quick-launch input\n"
+                << "  Q / Esc     quit\n"
+                << "  Mouse       hover highlights, left click chooses, "
+                   "right click opens the project menu\n\n"
+                << "Options:\n"
+                << "  --config PATH   Use an alternate config file.\n"
+                << "  --where-claude  Print the resolved Claude executable "
+                   "and exit.\n\n"
+                << "The default config is ./claudex-config.json and the "
+                   "default theme is ./claudex-theme.json next to the "
+                   "executable.\n"
+                << "Missing or invalid config and theme keys are repaired "
+                   "automatically at startup.\n"
+                << "CLAUDEX_CONFIG may also specify a config path.\n";
+            return 0;
+        } else {
+            std::cerr << "Unknown argument: " << argument
+                      << "\nUse --help for usage.\n";
+            return 2;
+        }
+    }
+
+    if (configFile.is_relative()) {
+        std::error_code ec;
+        fs::path absolute = fs::absolute(configFile, ec);
+        if (!ec) {
+            configFile = std::move(absolute);
+        }
+    }
+
+    ConfigManager config(executableDir, configFile);
+    config.load();
+    config.log("INFO", "launcher starting; root=" + pathToUtf8(executableDir) +
+                           " config=" + pathToUtf8(config.configFile()) +
+                           " theme=" + pathToUtf8(config.themeFile()));
+    if (config.loadHadError()) {
+        config.log("ERROR", "config load: " + config.loadWarning());
+    }
+    if (!config.configIssues().empty()) {
+        config.log("WARN", "config has " +
+                               std::to_string(config.configIssues().size()) +
+                               " key issue(s)");
+    }
+
+    if (whereClaude) {
+        std::string error;
+        const std::optional<fs::path> executable =
+            config.findClaudeExecutable(error);
+        if (executable) {
+            std::cout << pathToUtf8(*executable) << "\n";
+            return 0;
+        }
+        std::cerr << error << "\n";
+        return 1;
+    }
+
+    auto screen = ScreenInteractive::TerminalOutput();
+    enum class Page {
+        Main = 0,
+        Path,
+        ConfirmCreate,
+        ProjectActions,
+        ConfirmRemove
+    };
+    Page page = Page::Main;
+    int pageIndex = static_cast<int>(Page::Main);
+
+    std::vector<std::string> menuEntries;
+    int mainSelected = 0;
+    std::string statusMessage;
+    bool statusIsError = false;
+    std::string pathInput;
+    std::string pathInputPlaceholder;
+    std::string projectName;
+    std::string projectNamePlaceholder;
+    std::string pathError;
+    int pathCursor = 0;
+    int nameCursor = 0;
+    // 0 = path field, 1 = name field.
+    int pathFocus = 0;
+    enum class PathMode { Add, Edit, Rename };
+    PathMode pathMode = PathMode::Add;
+    int pathEditIndex = -1;
+    fs::path pendingPath;
+
+    // The main page has up to three focus targets. mainFocus is an index into
+    // mainFocusOrder, which is built from the authored block order below.
+    int mainFocus = 0;
+    std::vector<std::string> recentMenuEntries;
+    std::vector<int> recentProjectIndices;
+    int recentSelected = 0;
+
+    // Hit boxes refreshed by reflect() on every draw. They let the root event
+    // handler turn mouse position into a section and row before the menus run.
+    // Start them empty so a stray event before the first draw matches nothing.
+    std::vector<Box> projectRowBoxes;
+    std::vector<Box> recentRowBoxes;
+    Box projectListBox = kEmptyHitBox;
+    Box recentListBox = kEmptyHitBox;
+    Box quickInputBox = kEmptyHitBox;
+    std::string quickInput;
+    int quickInputCursor = 0;
+    fs::path pendingLaunchPath;
+
+    std::vector<std::string> projectActionEntries;
+    std::vector<Box> actionRowBoxes;
+    int projectActionSelected = 0;
+
+    // Shared clickable Back/Confirm bar for the path and confirmation pages.
+    // Page transitions install the labels and callbacks; Esc/Enter keep working
+    // through the regular key bindings.
+    DialogButtonBar dialogBar;
+    std::function<void()> pathContinueAction;
+    std::function<void()> pathCancelAction;
+    std::function<void()> createConfirmAction;
+    std::function<void()> createBackAction;
+    std::function<void()> removeConfirmAction;
+    std::function<void()> removeCancelAction;
+    int removeIndex = -1;
+    bool launchRequested = false;
+    int pendingLaunchIndex = -1;
+    std::string pendingCommand;
+
+    // The main project list and the action list are ordinary components, but
+    // their decoration and add-row behavior come from their screen blocks.
+    const json emptyBlockList = json::array();
+    auto screenBlocks = [&](const char* name) -> const json& {
+        auto item = config.menuTheme.screens.find(name);
+        return item == config.menuTheme.screens.end() ? emptyBlockList
+                                                      : item->second.blocks;
+    };
+
+    // Focus order follows the actual top-to-bottom block order, so Up/Down
+    // boundary jumps and Tab agree with what is drawn on screen.
+    std::vector<int> mainFocusOrder;
+    collectMainFocusOrder(screenBlocks("main"), mainFocusOrder);
+
+    auto focusIndexOf = [&](int node) -> int {
+        auto found =
+            std::find(mainFocusOrder.begin(), mainFocusOrder.end(), node);
+        return found == mainFocusOrder.end()
+                   ? -1
+                   : static_cast<int>(found - mainFocusOrder.begin());
+    };
+    auto currentFocusNode = [&]() -> int {
+        if (mainFocus < 0 ||
+            mainFocus >= static_cast<int>(mainFocusOrder.size())) {
+            return -1;
+        }
+        return mainFocusOrder[static_cast<std::size_t>(mainFocus)];
+    };
+    auto focusIs = [&](int node) { return currentFocusNode() == node; };
+    auto setFocusNode = [&](int node) -> bool {
+        const int index = focusIndexOf(node);
+        if (index < 0) {
+            return false;
+        }
+        mainFocus = index;
+        return true;
+    };
+
+    const int initialFocus = focusIndexOf(kMainFocusProjects);
+    mainFocus = initialFocus >= 0 ? initialFocus : 0;
+
+    const json* mainListBlock =
+        findBlockByType(screenBlocks("main"), "projectList");
+    const json* actionListBlock =
+        findBlockByType(screenBlocks("projectActions"), "actionList");
+
+    const std::string listEntryFormat =
+        mainListBlock
+            ? jsonStringField(*mainListBlock, "entryFormat",
+                              config.menuTheme.projectEntryFormat)
+            : config.menuTheme.projectEntryFormat;
+    const std::string listActivePrefix =
+        mainListBlock ? jsonStringField(*mainListBlock, "activePrefix",
+                                        config.menuTheme.activePrefix)
+                      : config.menuTheme.activePrefix;
+    const std::string listInactivePrefix =
+        mainListBlock ? jsonStringField(*mainListBlock, "inactivePrefix",
+                                        config.menuTheme.inactivePrefix)
+                      : config.menuTheme.inactivePrefix;
+    const bool showAddProject =
+        mainListBlock ? jsonBoolField(*mainListBlock, "addProject", true)
+                      : true;
+    const bool listInverseHighlight =
+        mainListBlock
+            ? jsonBoolField(*mainListBlock, "inverseHighlight", true)
+            : true;
+    const int listHeight =
+        mainListBlock ? jsonIntFieldResolved(*mainListBlock, "height", 10,
+                                 &config.menuTheme.variables) : 10;
+    const bool listScroll =
+        mainListBlock ? jsonBoolField(*mainListBlock, "scroll", true) : true;
+    const bool listFrame =
+        mainListBlock ? jsonBoolField(*mainListBlock, "frame", true) : true;
+
+    const json* recentListBlock =
+        findBlockByType(screenBlocks("main"), "recentList");
+    const int recentLimit =
+        std::max(0, recentListBlock
+                        ? jsonIntFieldResolved(*recentListBlock, "limit",
+                                       config.menuTheme.recentLimit,
+                                       &config.menuTheme.variables)
+                        : config.menuTheme.recentLimit);
+    const std::string recentEntryFormat =
+        recentListBlock
+            ? jsonStringField(*recentListBlock, "entryFormat",
+                              config.menuTheme.recentEntryFormat)
+            : config.menuTheme.recentEntryFormat;
+    // Multi-line entry formats. An empty list means "one line from
+    // entryFormat"; entryLines takes priority when the block provides it.
+    const std::vector<std::string> projectEntryLines =
+        mainListBlock != nullptr
+            ? stringListField(*mainListBlock, "entryLines", {})
+            : std::vector<std::string>{};
+    const std::vector<std::string> recentEntryLines =
+        recentListBlock != nullptr
+            ? stringListField(*recentListBlock, "entryLines", {})
+            : std::vector<std::string>{};
+
+    auto projectLinesFor = [&](int index,
+                               const std::string& raw) -> std::vector<std::string> {
+        if (index < 0 || index >= static_cast<int>(config.projects.size())) {
+            return {raw};
+        }
+        const Project& project =
+            config.projects[static_cast<std::size_t>(index)];
+        const std::vector<std::string>& lines =
+            projectEntryLines.empty() ? std::vector<std::string>{listEntryFormat}
+                                      : projectEntryLines;
+        return expandEntryLines(lines, project.name, project.path,
+                                project.lastUsed, &config.menuTheme.variables);
+    };
+
+    auto recentLinesFor = [&](int index) -> std::vector<std::string> {
+        if (index < 0 ||
+            index >= static_cast<int>(recentProjectIndices.size())) {
+            return {};
+        }
+        const Project& project = config.projects[static_cast<std::size_t>(
+            recentProjectIndices[static_cast<std::size_t>(index)])];
+        const std::vector<std::string>& lines =
+            recentEntryLines.empty() ? std::vector<std::string>{recentEntryFormat}
+                                     : recentEntryLines;
+        return expandEntryLines(lines, project.name, project.path,
+                                project.lastUsed, &config.menuTheme.variables);
+    };
+
+    const std::string recentActivePrefix =
+        recentListBlock
+            ? jsonStringField(*recentListBlock, "activePrefix",
+                              config.menuTheme.activePrefix)
+            : config.menuTheme.activePrefix;
+    const std::string recentInactivePrefix =
+        recentListBlock
+            ? jsonStringField(*recentListBlock, "inactivePrefix",
+                              config.menuTheme.inactivePrefix)
+            : config.menuTheme.inactivePrefix;
+    const bool recentInverseHighlight =
+        recentListBlock
+            ? jsonBoolField(*recentListBlock, "inverseHighlight", true)
+            : true;
+    const int recentHeight =
+        recentListBlock ? jsonIntFieldResolved(*recentListBlock, "height", 0,
+                                  &config.menuTheme.variables) : 0;
+    const bool recentScroll =
+        recentListBlock ? jsonBoolField(*recentListBlock, "scroll", false)
+                        : false;
+    const bool recentFrame =
+        recentListBlock ? jsonBoolField(*recentListBlock, "frame", false)
+                        : false;
+    std::string quickInputPlaceholder =
+        config.expandPath(config.menuTheme.quickInputPlaceholder);
+
+    const int actionHeight =
+        actionListBlock ? jsonIntFieldResolved(*actionListBlock, "height", 0,
+                                  &config.menuTheme.variables) : 0;
+    const bool actionScroll =
+        actionListBlock ? jsonBoolField(*actionListBlock, "scroll", false)
+                        : false;
+    const bool actionFrame =
+        actionListBlock ? jsonBoolField(*actionListBlock, "frame", false)
+                        : false;
+    const bool actionInverseHighlight =
+        actionListBlock
+            ? jsonBoolField(*actionListBlock, "inverseHighlight", true)
+            : true;
+
+    // A list becomes a grid when its block asks for columns: a number fixes
+    // the column count, "auto" fills the available width.
+    auto gridSpecFor = [&](const json* block, int& columns,
+                           bool& autoColumns) {
+        columns = 0;
+        autoColumns = false;
+        if (block == nullptr || !block->contains("columns")) {
+            return false;
+        }
+        const json& value = (*block)["columns"];
+        if (value.is_string() &&
+            normalizeMenuToken(value.get<std::string>()) == "auto") {
+            autoColumns = true;
+            return true;
+        }
+        if (const auto resolved =
+                resolveThemeInt(value, &config.menuTheme.variables)) {
+            columns = *resolved;
+            return columns > 1;
+        }
+        return false;
+    };
+
+    auto makeGridOptions = [&](const json* block, int columns,
+                               bool autoColumns, const std::string& active,
+                               const std::string& inactive, bool inverse) {
+        GridMenuOptions options;
+        options.columns = columns;
+        options.autoColumns = autoColumns;
+        options.activePrefix = active;
+        options.inactivePrefix = inactive;
+        options.inverseHighlight = inverse;
+        options.variables = &config.menuTheme.variables;
+        if (block != nullptr) {
+            options.cellWidth = jsonIntFieldResolved(
+                *block, "cellWidth", 0, &config.menuTheme.variables);
+            options.columnGap = jsonIntFieldResolved(
+                *block, "columnGap", 2, &config.menuTheme.variables);
+            options.pageRows = jsonIntFieldResolved(
+                *block, "pageRows", 5, &config.menuTheme.variables);
+        }
+        return options;
+    };
+
+    auto setStatus = [&](std::string message, bool error) {
+        statusMessage = std::move(message);
+        statusIsError = error;
+    };
+
+    auto updatePathPlaceholder = [&]() {
+        pathInputPlaceholder =
+            config.expandPath(config.menuTheme.pathPlaceholder);
+        projectNamePlaceholder =
+            config.expandPath(config.menuTheme.projectNamePlaceholder);
+    };
+
+    auto refreshRecent = [&]() {
+        const int keepProject =
+            recentSelected >= 0 &&
+                    recentSelected <
+                        static_cast<int>(recentProjectIndices.size())
+                ? recentProjectIndices[static_cast<std::size_t>(
+                      recentSelected)]
+                : -1;
+        recentMenuEntries.clear();
+        recentProjectIndices.clear();
+        if (recentLimit > 0) {
+            std::vector<int> indices;
+            indices.reserve(config.projects.size());
+            for (int i = 0;
+                 i < static_cast<int>(config.projects.size()); ++i) {
+                if (!config.projects[static_cast<std::size_t>(i)]
+                         .lastUsed.empty()) {
+                    indices.push_back(i);
+                }
+            }
+            std::stable_sort(
+                indices.begin(), indices.end(), [&](int lhs, int rhs) {
+                    return config.projects[static_cast<std::size_t>(lhs)]
+                               .lastUsed >
+                           config.projects[static_cast<std::size_t>(rhs)]
+                               .lastUsed;
+                });
+            if (static_cast<int>(indices.size()) > recentLimit) {
+                indices.resize(static_cast<std::size_t>(recentLimit));
+            }
+            for (int index : indices) {
+                const Project& project =
+                    config.projects[static_cast<std::size_t>(index)];
+                // The entry text is built at render time from the project,
+                // so the name is available too.
+                recentMenuEntries.push_back(project.path);
+                recentProjectIndices.push_back(index);
+            }
+        }
+        recentRowBoxes.assign(recentMenuEntries.size(), kEmptyHitBox);
+        if (recentMenuEntries.empty()) {
+            recentSelected = 0;
+        } else {
+            auto kept = std::find(recentProjectIndices.begin(),
+                                  recentProjectIndices.end(), keepProject);
+            if (kept != recentProjectIndices.end()) {
+                recentSelected =
+                    static_cast<int>(kept - recentProjectIndices.begin());
+            } else {
+                recentSelected = std::clamp(
+                    recentSelected, 0,
+                    static_cast<int>(recentMenuEntries.size()) - 1);
+            }
+        }
+        if (focusIs(kMainFocusRecent) && recentMenuEntries.empty()) {
+            if (!setFocusNode(kMainFocusProjects)) {
+                mainFocus = 0;
+            }
+        }
+    };
+
+    auto refreshMenu = [&]() {
+        menuEntries.clear();
+        for (const Project& project : config.projects) {
+            menuEntries.push_back(project.path);
+        }
+        if (showAddProject) {
+            menuEntries.push_back(config.menuTheme.addProjectLabel);
+        }
+
+        projectRowBoxes.assign(menuEntries.size(), kEmptyHitBox);
+        if (menuEntries.empty()) {
+            mainSelected = 0;
+        } else {
+            mainSelected =
+                std::clamp(mainSelected, 0, static_cast<int>(menuEntries.size()) - 1);
+        }
+        refreshRecent();
+    };
+
+    auto refreshActions = [&]() {
+        projectActionEntries.clear();
+        for (const MenuAction& action : config.menuTheme.actions) {
+            projectActionEntries.push_back(action.label);
+        }
+        actionRowBoxes.assign(projectActionEntries.size(), kEmptyHitBox);
+        if (projectActionEntries.empty()) {
+            projectActionSelected = 0;
+        } else {
+            projectActionSelected =
+                std::clamp(projectActionSelected, 0,
+                           static_cast<int>(projectActionEntries.size()) - 1);
+        }
+    };
+
+    refreshActions();
+
+    auto clearProjectStatus = [&]() {
+        if (statusIsError) {
+            statusMessage.clear();
+            statusIsError = false;
+        }
+    };
+
+    // Every page transition installs the buttons that belong to that page, so
+    // the same clickable Back/Confirm bar serves the path and confirm screens.
+    auto switchPage = [&](Page next) {
+        page = next;
+        pageIndex = static_cast<int>(next);
+        if (next == Page::Path) {
+            dialogBar.set(
+                {config.menuTheme.pathContinueLabel,
+                 config.menuTheme.pathCancelLabel},
+                [&](int index) {
+                    if (index == 0) {
+                        if (pathContinueAction) {
+                            pathContinueAction();
+                        }
+                    } else if (pathCancelAction) {
+                        pathCancelAction();
+                    }
+                });
+        } else if (next == Page::ConfirmCreate) {
+            dialogBar.set(
+                {config.menuTheme.confirmCreateLabel,
+                 config.menuTheme.confirmCreateBackLabel},
+                [&](int index) {
+                    if (index == 0) {
+                        if (createConfirmAction) {
+                            createConfirmAction();
+                        }
+                    } else if (createBackAction) {
+                        createBackAction();
+                    }
+                });
+        } else if (next == Page::ConfirmRemove) {
+            dialogBar.set(
+                {config.menuTheme.confirmRemoveLabel,
+                 config.menuTheme.confirmRemoveBackLabel},
+                [&](int index) {
+                    if (index == 0) {
+                        if (removeConfirmAction) {
+                            removeConfirmAction();
+                        }
+                    } else if (removeCancelAction) {
+                        removeCancelAction();
+                    }
+                });
+        } else {
+            dialogBar.clear();
+        }
+    };
+
+    auto beginAddProject = [&]() {
+        pathMode = PathMode::Add;
+        pathEditIndex = -1;
+        pathInput.clear();
+        projectName.clear();
+        pathCursor = 0;
+        nameCursor = 0;
+        pathFocus = 0;
+        pathError.clear();
+        pendingPath.clear();
+        updatePathPlaceholder();
+        switchPage(Page::Path);
+    };
+
+    auto beginProjectActions = [&]() {
+        if (mainSelected < 0 ||
+            mainSelected >= static_cast<int>(config.projects.size())) {
+            setStatus(messageText(config.menuTheme, "selectProjectFirst"),
+                      false);
+            return;
+        }
+        projectActionSelected = 0;
+        switchPage(Page::ProjectActions);
+    };
+
+    auto beginEditProject = [&](PathMode mode) {
+        if (config.projects.empty() ||
+            mainSelected < 0 ||
+            mainSelected >= static_cast<int>(config.projects.size())) {
+            setStatus(messageText(config.menuTheme, "selectProjectFirst"),
+                      false);
+            return;
+        }
+        const Project& project =
+            config.projects[static_cast<std::size_t>(mainSelected)];
+        pathMode = mode;
+        pathEditIndex = mainSelected;
+        pathInput = project.path;
+        projectName = project.name;
+        pathCursor = static_cast<int>(pathInput.size());
+        nameCursor = static_cast<int>(projectName.size());
+        pathFocus = mode == PathMode::Rename ? 1 : 0;
+        pathError.clear();
+        pendingPath.clear();
+        updatePathPlaceholder();
+        switchPage(Page::Path);
+    };
+
+    auto saveConfigWithStatus = [&](const std::string& successMessage) {
+        std::string error;
+        if (!config.save(error)) {
+            setStatus(error, true);
+            return false;
+        }
+        setStatus(successMessage, false);
+        return true;
+    };
+
+    auto moveProject = [&](int step, bool toEnd) {
+        if (config.projects.empty() || mainSelected < 0 ||
+            mainSelected >= static_cast<int>(config.projects.size())) {
+            setStatus(messageText(config.menuTheme, "selectProjectFirst"),
+                      false);
+            switchPage(Page::Main);
+            return;
+        }
+
+        const int index = mainSelected;
+        const int last = static_cast<int>(config.projects.size()) - 1;
+        const int target = toEnd ? (step < 0 ? 0 : last)
+                                 : std::clamp(index + step, 0, last);
+        if (target == index) {
+            setStatus(messageText(config.menuTheme,
+                                  step < 0 ? "projectAlreadyFirst"
+                                           : "projectAlreadyLast"),
+                      false);
+            switchPage(Page::Main);
+            return;
+        }
+
+        Project moved = std::move(config.projects[static_cast<std::size_t>(
+            index)]);
+        config.projects.erase(config.projects.begin() + index);
+        config.projects.insert(config.projects.begin() + target,
+                               std::move(moved));
+        refreshMenu();
+        mainSelected = target;
+        saveConfigWithStatus(messageText(config.menuTheme, "projectMoved"));
+        switchPage(Page::Main);
+    };
+
+    auto commitPath = [&](const fs::path& absolutePath) {
+        const std::string storedPath =
+            config.storeProjectPath(pathInput, absolutePath);
+
+        if (pathMode == PathMode::Edit) {
+            if (pathEditIndex < 0 ||
+                pathEditIndex >= static_cast<int>(config.projects.size())) {
+                pathError = messageText(config.menuTheme,
+                                        "projectNoLongerListed");
+                switchPage(Page::Path);
+                return;
+            }
+            config.projects[static_cast<std::size_t>(pathEditIndex)].path =
+                storedPath;
+            config.projects[static_cast<std::size_t>(pathEditIndex)].name =
+                trim(projectName);
+            if (!saveConfigWithStatus(messageText(
+                    config.menuTheme, "projectPathUpdated"))) {
+                pathError = statusMessage;
+                switchPage(Page::Path);
+                return;
+            }
+            refreshMenu();
+            mainSelected = pathEditIndex;
+            switchPage(Page::Main);
+            return;
+        }
+
+        // A newly added project has not been launched yet, so it does not
+        // appear in the recent list until it is actually used. Repeating a
+        // path is allowed.
+        config.projects.push_back(
+            Project{storedPath, "", trim(projectName)});
+        const int addedIndex = static_cast<int>(config.projects.size()) - 1;
+        const bool saved =
+            saveConfigWithStatus(messageText(config.menuTheme, "projectAdded"));
+        std::string saveFailure;
+        if (!saved) {
+            saveFailure = statusMessage;
+        }
+        refreshMenu();
+        mainSelected = addedIndex;
+        switchPage(Page::Main);
+        if (!saved) {
+            statusMessage = messageText(config.menuTheme,
+                                        "projectAddedSaveFailed",
+                                        {{"error", saveFailure}});
+            statusIsError = true;
+        }
+    };
+
+    // Rename only touches the name: the path is shown read-only and is not
+    // resolved again.
+    auto commitRename = [&]() {
+        if (pathEditIndex < 0 ||
+            pathEditIndex >= static_cast<int>(config.projects.size())) {
+            pathError = messageText(config.menuTheme,
+                                    "projectNoLongerListed");
+            switchPage(Page::Path);
+            return;
+        }
+        config.projects[static_cast<std::size_t>(pathEditIndex)].name =
+            trim(projectName);
+        if (!saveConfigWithStatus(
+                messageText(config.menuTheme, "projectNameUpdated"))) {
+            pathError = statusMessage;
+            switchPage(Page::Path);
+            return;
+        }
+        refreshMenu();
+        mainSelected = pathEditIndex;
+        switchPage(Page::Main);
+    };
+
+    auto submitPath = [&]() {
+        pathError.clear();
+        if (pathMode == PathMode::Rename) {
+            commitRename();
+            return;
+        }
+        const std::string entered = trim(pathInput);
+        if (entered.empty()) {
+            pathError = messageText(config.menuTheme, "enterFolderPath");
+            return;
+        }
+
+        const PathResolution resolution = config.resolvePath(
+            entered, PathKind::Directory, MultiMatchPolicy::RequireUnique);
+        if (resolution.wildcard && resolution.noMatch) {
+            pathError = messageText(config.menuTheme, "pathPatternNoMatch",
+                                    {{"value", resolution.expanded}});
+            return;
+        }
+        if (resolution.wildcard && resolution.ambiguous) {
+            std::string candidates;
+            for (const fs::path& match : resolution.matches) {
+                if (!candidates.empty()) {
+                    candidates += ", ";
+                }
+                candidates += pathToUtf8(match);
+            }
+            pathError = messageText(config.menuTheme, "pathPatternAmbiguous",
+                                    {{"value", resolution.expanded},
+                                     {"candidates", candidates}});
+            return;
+        }
+        const fs::path absolute = resolution.path;
+        if (!resolution.resolved || absolute.empty()) {
+            pathError = messageText(config.menuTheme, "invalidFolderPath");
+            return;
+        }
+
+        std::error_code ec;
+        if (fs::is_directory(absolute, ec) && !ec) {
+            commitPath(absolute);
+            return;
+        }
+        if (fs::exists(absolute, ec) && !ec) {
+            pathError = messageText(config.menuTheme, "pathNotFolder",
+                                    {{"path", pathToUtf8(absolute)}});
+            return;
+        }
+        if (ec && ec != std::errc::no_such_file_or_directory) {
+            pathError = messageText(
+                config.menuTheme, "pathInspectFailed",
+                {{"path", pathToUtf8(absolute)}, {"error", ec.message()}});
+            return;
+        }
+
+        pendingPath = absolute;
+        switchPage(Page::ConfirmCreate);
+    };
+
+    auto requestLaunchIndex = [&](int index) {
+        if (index < 0 ||
+            index >= static_cast<int>(config.projects.size())) {
+            return;
+        }
+
+        pendingLaunchIndex = index;
+        pendingLaunchPath.clear();
+        pendingCommand.clear();
+        launchRequested = true;
+        switchPage(Page::Main);
+        screen.Exit();
+    };
+
+    auto requestLaunch = [&]() { requestLaunchIndex(mainSelected); };
+
+    // Quick launch validates the typed folder but never writes it to the
+    // project list. When the folder is already listed, this counts as a normal
+    // launch so its lastUsed timestamp is refreshed.
+    auto submitQuickLaunch = [&]() {
+        const std::string entered = trim(quickInput);
+        if (entered.empty()) {
+            setStatus(messageText(config.menuTheme, "quickPathEmpty"), true);
+            return;
+        }
+
+        const PathResolution resolution = config.resolvePath(
+            entered, PathKind::Directory, MultiMatchPolicy::RequireUnique);
+        if (resolution.wildcard && resolution.noMatch) {
+            setStatus(messageText(config.menuTheme, "pathPatternNoMatch",
+                                  {{"value", resolution.expanded}}),
+                      true);
+            return;
+        }
+        if (resolution.wildcard && resolution.ambiguous) {
+            std::string candidates;
+            for (const fs::path& match : resolution.matches) {
+                if (!candidates.empty()) {
+                    candidates += ", ";
+                }
+                candidates += pathToUtf8(match);
+            }
+            setStatus(messageText(config.menuTheme, "pathPatternAmbiguous",
+                                  {{"value", resolution.expanded},
+                                   {"candidates", candidates}}),
+                      true);
+            return;
+        }
+        const fs::path absolute = resolution.path;
+        if (!resolution.resolved || absolute.empty()) {
+            setStatus(messageText(config.menuTheme, "invalidFolderPath"),
+                      true);
+            return;
+        }
+
+        std::error_code ec;
+        if (!fs::is_directory(absolute, ec)) {
+            if (ec && ec != std::errc::no_such_file_or_directory) {
+                setStatus(
+                    messageText(config.menuTheme, "pathInspectFailed",
+                                {{"path", pathToUtf8(absolute)},
+                                 {"error", ec.message()}}),
+                    true);
+                return;
+            }
+            ec.clear();
+            if (fs::exists(absolute, ec) && !ec) {
+                setStatus(
+                    messageText(config.menuTheme, "pathNotFolder",
+                                {{"path", pathToUtf8(absolute)}}),
+                    true);
+            } else if (ec) {
+                setStatus(
+                    messageText(config.menuTheme, "pathInspectFailed",
+                                {{"path", pathToUtf8(absolute)},
+                                 {"error", ec.message()}}),
+                    true);
+            } else {
+                setStatus(
+                    messageText(config.menuTheme, "quickPathNotFound",
+                                {{"path", pathToUtf8(absolute)}}),
+                    true);
+            }
+            return;
+        }
+
+        quickInput.clear();
+        quickInputCursor = 0;
+        const int existing = config.findProject(absolute);
+        if (existing >= 0) {
+            requestLaunchIndex(existing);
+            return;
+        }
+
+        pendingLaunchIndex = -1;
+        pendingLaunchPath = absolute;
+        pendingCommand.clear();
+        launchRequested = true;
+        switchPage(Page::Main);
+        screen.Exit();
+    };
+
+    auto beginRemove = [&]() {
+        if (config.projects.empty() ||
+            mainSelected < 0 ||
+            mainSelected >= static_cast<int>(config.projects.size())) {
+            setStatus(messageText(config.menuTheme, "selectProjectFirst"),
+                      false);
+            return;
+        }
+        removeIndex = mainSelected;
+        switchPage(Page::ConfirmRemove);
+    };
+
+    // The visible buttons and the keyboard shortcuts share these actions.
+    pathContinueAction = submitPath;
+    pathCancelAction = [&]() {
+        pathError.clear();
+        switchPage(Page::Main);
+    };
+    createConfirmAction = [&]() {
+        std::error_code ec;
+        fs::create_directories(pendingPath, ec);
+        if (!ec) {
+            const bool isFolder = fs::is_directory(pendingPath, ec);
+            if (!isFolder && !ec) {
+                pathError = messageText(
+                    config.menuTheme, "pathNotFolder",
+                    {{"path", pathToUtf8(pendingPath)}});
+                switchPage(Page::Path);
+                return;
+            }
+        }
+        if (ec) {
+            pathError = messageText(
+                config.menuTheme, "pathCreateFailed",
+                {{"path", pathToUtf8(pendingPath)},
+                 {"error", ec.message()}});
+            switchPage(Page::Path);
+            return;
+        }
+        commitPath(pendingPath);
+    };
+    createBackAction = [&]() { switchPage(Page::Path); };
+    removeConfirmAction = [&]() {
+        if (removeIndex >= 0 &&
+            removeIndex < static_cast<int>(config.projects.size())) {
+            config.projects.erase(config.projects.begin() + removeIndex);
+            refreshMenu();
+            saveConfigWithStatus(
+                messageText(config.menuTheme, "projectRemoved"));
+        }
+        removeIndex = -1;
+        switchPage(Page::Main);
+    };
+    removeCancelAction = [&]() {
+        removeIndex = -1;
+        switchPage(Page::Main);
+    };
+
+    MenuOption menuOptions = MenuOption::Vertical();
+    menuOptions.entries_option.transform = [&](const EntryState& state) {
+        Element element = styleMenuEntryLines(
+            state, projectLinesFor(state.index, state.label), true,
+            focusIs(kMainFocusProjects), listActivePrefix, listInactivePrefix,
+            listInverseHighlight, &config.menuTheme.variables);
+        if (state.index >= 0 &&
+            state.index < static_cast<int>(projectRowBoxes.size())) {
+            element |= reflect(
+                projectRowBoxes[static_cast<std::size_t>(state.index)]);
+        }
+        return element;
+    };
+    menuOptions.on_enter = [&]() {
+        if (mainSelected >= 0 &&
+            mainSelected < static_cast<int>(config.projects.size())) {
+            requestLaunch();
+        } else if (showAddProject) {
+            beginAddProject();
+        }
+    };
+
+    refreshMenu();
+    updatePathPlaceholder();
+
+    auto mainMenu = Menu(&menuEntries, &mainSelected, menuOptions);
+
+    int projectGridColumns = 0;
+    bool projectGridAuto = false;
+    const bool projectUsesGrid =
+        gridSpecFor(mainListBlock, projectGridColumns, projectGridAuto);
+    std::shared_ptr<GridMenuComponent> projectGrid;
+    if (projectUsesGrid) {
+        GridMenuOptions options = makeGridOptions(
+            mainListBlock, projectGridColumns, projectGridAuto,
+            listActivePrefix, listInactivePrefix, listInverseHighlight);
+        options.format_lines = [&](int index, const std::string& label) {
+            return projectLinesFor(index, label);
+        };
+        options.on_change = clearProjectStatus;
+        options.on_enter = [&](int index) {
+            mainSelected = index;
+            if (index >= 0 &&
+                index < static_cast<int>(config.projects.size())) {
+                requestLaunch();
+            } else if (showAddProject) {
+                beginAddProject();
+            }
+        };
+        options.on_right_click = [&](int index) {
+            mainSelected = index;
+            beginProjectActions();
+        };
+        projectGrid = std::make_shared<GridMenuComponent>(
+            &menuEntries, &mainSelected, options);
+    }
+    const Component projectListComponent =
+        projectGrid ? Component(projectGrid) : Component(mainMenu);
+
+    MenuOption recentMenuOptions = MenuOption::Vertical();
+    recentMenuOptions.entries_option.transform = [&](const EntryState& state) {
+        Element element = styleMenuEntryLines(
+            state, recentLinesFor(state.index), true,
+            focusIs(kMainFocusRecent), recentActivePrefix,
+            recentInactivePrefix, recentInverseHighlight,
+            &config.menuTheme.variables);
+        if (state.index >= 0 &&
+            state.index < static_cast<int>(recentRowBoxes.size())) {
+            element |= reflect(
+                recentRowBoxes[static_cast<std::size_t>(state.index)]);
+        }
+        return element;
+    };
+    recentMenuOptions.on_change = clearProjectStatus;
+    recentMenuOptions.on_enter = [&]() {
+        if (recentSelected >= 0 &&
+            recentSelected <
+                static_cast<int>(recentProjectIndices.size())) {
+            requestLaunchIndex(
+                recentProjectIndices[static_cast<std::size_t>(
+                    recentSelected)]);
+        }
+    };
+    auto recentMenu =
+        Menu(&recentMenuEntries, &recentSelected, recentMenuOptions);
+
+    const json* recentListBlockForGrid =
+        findBlockByType(screenBlocks("main"), "recentList");
+    int recentGridColumns = 0;
+    bool recentGridAuto = false;
+    const bool recentUsesGrid = gridSpecFor(
+        recentListBlockForGrid, recentGridColumns, recentGridAuto);
+    std::shared_ptr<GridMenuComponent> recentGrid;
+    if (recentUsesGrid) {
+        GridMenuOptions options = makeGridOptions(
+            recentListBlockForGrid, recentGridColumns, recentGridAuto,
+            recentActivePrefix, recentInactivePrefix, recentInverseHighlight);
+        options.format_lines = [&](int index, const std::string&) {
+            return recentLinesFor(index);
+        };
+        options.on_change = clearProjectStatus;
+        options.on_enter = [&](int index) {
+            if (index >= 0 &&
+                index < static_cast<int>(recentProjectIndices.size())) {
+                requestLaunchIndex(
+                    recentProjectIndices[static_cast<std::size_t>(index)]);
+            }
+        };
+        options.on_right_click = [&](int index) {
+            if (index >= 0 &&
+                index < static_cast<int>(recentProjectIndices.size())) {
+                mainSelected =
+                    recentProjectIndices[static_cast<std::size_t>(index)];
+                beginProjectActions();
+            }
+        };
+        recentGrid = std::make_shared<GridMenuComponent>(
+            &recentMenuEntries, &recentSelected, options);
+    }
+    const Component recentListComponent =
+        recentGrid ? Component(recentGrid) : Component(recentMenu);
+
+    MenuOption actionMenuOptions = MenuOption::Vertical();
+    actionMenuOptions.entries_option.transform = [&](const EntryState& state) {
+        Element element =
+            styleMenuEntry(state, state.label, true, true,
+                           config.menuTheme.activePrefix,
+                           config.menuTheme.inactivePrefix,
+                           actionInverseHighlight,
+                           &config.menuTheme.variables);
+        if (state.index >= 0 &&
+            state.index < static_cast<int>(actionRowBoxes.size())) {
+            element |= reflect(
+                actionRowBoxes[static_cast<std::size_t>(state.index)]);
+        }
+        return element;
+    };
+    auto projectActionsMenu = Menu(&projectActionEntries,
+                                   &projectActionSelected, actionMenuOptions);
+
+    // activateProjectAction is defined further down, so the grid calls it
+    // through this placeholder, which is bound before the first draw.
+    std::function<void()> activateActionCallback;
+    int actionGridColumns = 0;
+    bool actionGridAuto = false;
+    const bool actionUsesGrid = gridSpecFor(
+        actionListBlock, actionGridColumns, actionGridAuto);
+    std::shared_ptr<GridMenuComponent> actionGrid;
+    if (actionUsesGrid) {
+        GridMenuOptions options = makeGridOptions(
+            actionListBlock, actionGridColumns, actionGridAuto,
+            config.menuTheme.activePrefix, config.menuTheme.inactivePrefix,
+            actionInverseHighlight);
+        options.on_enter = [&](int index) {
+            projectActionSelected = index;
+            if (activateActionCallback) {
+                activateActionCallback();
+            }
+        };
+        actionGrid = std::make_shared<GridMenuComponent>(
+            &projectActionEntries, &projectActionSelected, options);
+    }
+    const Component actionListComponent =
+        actionGrid ? Component(actionGrid) : Component(projectActionsMenu);
+
+    InputOption pathInputOptions;
+    pathInputOptions.multiline = false;
+    pathInputOptions.cursor_position = &pathCursor;
+    auto pathInputComponent =
+        Input(&pathInput, &pathInputPlaceholder, pathInputOptions);
+
+    InputOption nameInputOptions;
+    nameInputOptions.multiline = false;
+    nameInputOptions.cursor_position = &nameCursor;
+    auto nameInputComponent =
+        Input(&projectName, &projectNamePlaceholder, nameInputOptions);
+
+    // Both fields share the path page; Tab moves between them. A custom path
+    // screen may not lay out the name block, in which case the field is left
+    // out of the container so the focus cannot land on something invisible.
+    const bool nameFieldShown =
+        findBlockByType(screenThemeFor(config.menuTheme, "path").blocks,
+                        "nameInput") != nullptr;
+    auto pathFields =
+        nameFieldShown
+            ? Container::Vertical({pathInputComponent, nameInputComponent},
+                                  &pathFocus)
+            : Container::Vertical({pathInputComponent}, &pathFocus);
+
+    InputOption quickInputOptions;
+    quickInputOptions.multiline = false;
+    quickInputOptions.cursor_position = &quickInputCursor;
+    quickInputOptions.on_enter = submitQuickLaunch;
+    auto quickInputComponent =
+        Input(&quickInput, &quickInputPlaceholder, quickInputOptions);
+
+    // Build the container in the same order as the blocks, so arrow-key
+    // boundary jumps and Tab always move to the visually adjacent section.
+    Components mainChildren;
+    for (int node : mainFocusOrder) {
+        if (node == kMainFocusProjects) {
+            mainChildren.push_back(projectListComponent);
+        } else if (node == kMainFocusRecent) {
+            mainChildren.push_back(recentListComponent);
+        } else if (node == kMainFocusQuickInput) {
+            mainChildren.push_back(quickInputComponent);
+        }
+    }
+    if (mainChildren.empty()) {
+        mainChildren.push_back(projectListComponent);
+    }
+    auto mainContent = Container::Vertical(mainChildren, &mainFocus);
+    auto mainPage = Renderer(mainContent, [&] {
+        int focusedIndex = mainSelected;
+        if (focusIs(kMainFocusRecent) && recentSelected >= 0 &&
+            recentSelected <
+                static_cast<int>(recentProjectIndices.size())) {
+            focusedIndex = recentProjectIndices[static_cast<std::size_t>(
+                recentSelected)];
+        }
+
+        std::string selectedProject;
+        std::string selectedName;
+        if (focusedIndex >= 0 &&
+            focusedIndex < static_cast<int>(config.projects.size())) {
+            const Project& project =
+                config.projects[static_cast<std::size_t>(focusedIndex)];
+            selectedProject = pathToUtf8(config.resolveProjectPath(project));
+            selectedName = project.name;
+        }
+
+        BlockRenderContext context;
+        context.config = &config;
+        context.theme = &config.menuTheme;
+        context.projectPath = selectedProject;
+        context.projectName = selectedName;
+        context.pathText = selectedProject;
+        context.statusText = statusMessage;
+        context.statusIsError = statusIsError;
+        context.showAddProject = showAddProject;
+        context.hasSelection = !selectedProject.empty();
+        context.recentCount =
+            static_cast<int>(recentMenuEntries.size());
+
+        Element list = projectListComponent->Render();
+        if (listScroll) {
+            list = list | vscroll_indicator;
+        }
+        if (listFrame) {
+            list = list | frame;
+        }
+        if (listHeight > 0) {
+            list = list | size(HEIGHT, LESS_THAN, listHeight);
+        }
+        context.projectList =
+            std::move(list) | reflect(projectListBox);
+        context.hasProjectList = true;
+
+        if (!recentMenuEntries.empty()) {
+            Element recent = recentListComponent->Render();
+            if (recentScroll) {
+                recent = recent | vscroll_indicator;
+            }
+            if (recentFrame) {
+                recent = recent | frame;
+            }
+            if (recentHeight > 0) {
+                recent = recent | size(HEIGHT, LESS_THAN, recentHeight);
+            }
+            context.recentList =
+                std::move(recent) | reflect(recentListBox);
+            context.hasRecentList = true;
+        } else {
+            // The section is hidden; make sure its old hit box cannot keep
+            // receiving mouse events.
+            recentListBox = kEmptyHitBox;
+        }
+
+        context.quickInput =
+            quickInputComponent->Render() | reflect(quickInputBox);
+        context.hasQuickInput = true;
+
+        return renderScreen(screenThemeFor(config.menuTheme, "main"),
+                            context);
+    });
+
+    auto pathPage = Renderer(pathFields, [&] {
+        const ScreenTheme& screen =
+            screenThemeFor(config.menuTheme, "path");
+
+        BlockRenderContext context;
+        context.config = &config;
+        context.theme = &config.menuTheme;
+        if (pathMode == PathMode::Add) {
+            context.modeText = screen.addTitle;
+        } else if (pathMode == PathMode::Rename) {
+            context.modeText = screen.renameTitle.empty() ? screen.editTitle
+                                                          : screen.renameTitle;
+        } else {
+            context.modeText = screen.editTitle;
+        }
+        context.pathText = pathInput;
+        context.projectName = projectName;
+        context.errorText = pathError;
+        // Rename shows the path but does not let it be edited.
+        context.pathInput =
+            pathMode == PathMode::Rename
+                ? hbox({text(" "), text(pathInput)})
+                : hbox({text(" "), pathInputComponent->Render() | flex});
+        context.hasPathInput = true;
+        context.projectNameInput =
+            hbox({text(" "), nameInputComponent->Render() | flex});
+        context.hasProjectNameInput = true;
+        context.dialogButtons = dialogBar.render(config.menuTheme);
+        context.hasDialogButtons = true;
+
+        return renderScreen(screen, context);
+    });
+
+    auto confirmCreatePage = Renderer([&] {
+        BlockRenderContext context;
+        context.config = &config;
+        context.theme = &config.menuTheme;
+        context.pathText = pathToUtf8(pendingPath);
+        context.projectPath = context.pathText;
+        context.errorText = pathError;
+        context.dialogButtons = dialogBar.render(config.menuTheme);
+        context.hasDialogButtons = true;
+        return renderScreen(
+            screenThemeFor(config.menuTheme, "confirmCreate"), context);
+    });
+
+    auto projectActionsPage = Renderer(actionListComponent, [&] {
+        std::string projectPath;
+        std::string projectName;
+        if (mainSelected >= 0 &&
+            mainSelected < static_cast<int>(config.projects.size())) {
+            const Project& project =
+                config.projects[static_cast<std::size_t>(mainSelected)];
+            projectPath = pathToUtf8(config.resolveProjectPath(project));
+            projectName = project.name;
+        }
+
+        BlockRenderContext context;
+        context.config = &config;
+        context.theme = &config.menuTheme;
+        context.projectPath = projectPath;
+        context.projectName = projectName;
+        context.pathText = projectPath;
+        context.statusText = statusMessage;
+        context.statusIsError = statusIsError;
+        context.hasSelection = !projectPath.empty();
+
+        Element actions = actionGrid ? actionGrid->Render()
+                                       : projectActionsMenu->Render();
+        if (actionScroll) {
+            actions = actions | vscroll_indicator;
+        }
+        if (actionFrame) {
+            actions = actions | frame;
+        }
+        if (actionHeight > 0) {
+            actions = actions | size(HEIGHT, LESS_THAN, actionHeight);
+        }
+        context.actionList = std::move(actions);
+        context.hasActionList = true;
+
+        return renderScreen(
+            screenThemeFor(config.menuTheme, "projectActions"), context);
+    });
+
+    auto confirmRemovePage = Renderer([&] {
+        std::string projectPath;
+        if (removeIndex >= 0 &&
+            removeIndex < static_cast<int>(config.projects.size())) {
+            projectPath = pathToUtf8(
+                config.resolveProjectPath(config.projects[removeIndex]));
+        }
+
+        BlockRenderContext context;
+        context.config = &config;
+        context.theme = &config.menuTheme;
+        context.pathText = projectPath;
+        context.projectPath = projectPath;
+        context.hasSelection = !projectPath.empty();
+        context.dialogButtons = dialogBar.render(config.menuTheme);
+        context.hasDialogButtons = true;
+        return renderScreen(
+            screenThemeFor(config.menuTheme, "confirmRemove"), context);
+    });
+
+    auto pages = Container::Tab(
+        {mainPage, pathPage, confirmCreatePage, projectActionsPage,
+         confirmRemovePage},
+        &pageIndex);
+
+    const bool tabOnlySectionSwitch =
+        config.settings.tabOnlySectionSwitch;
+
+    // Tab is handled before the page components so a Menu cannot swallow it
+    // and keep focus inside the project list. The order is the authored block
+    // order, with an empty recent list skipped because its Menu is not
+    // focusable.
+    auto moveMainFocus = [&](int step, bool wrap) {
+        std::vector<int> available;
+        for (int i = 0;
+             i < static_cast<int>(mainFocusOrder.size()); ++i) {
+            if (mainFocusOrder[static_cast<std::size_t>(i)] ==
+                    kMainFocusRecent &&
+                recentMenuEntries.empty()) {
+                continue;
+            }
+            available.push_back(i);
+        }
+        if (available.empty()) {
+            return;
+        }
+        auto found = std::find(available.begin(), available.end(), mainFocus);
+        int position =
+            found == available.end() ? 0 : static_cast<int>(found - available.begin());
+        int next = position + step;
+        if (wrap) {
+            next = (next + static_cast<int>(available.size())) %
+                   static_cast<int>(available.size());
+        } else if (next < 0 || next >= static_cast<int>(available.size())) {
+            return;
+        }
+        mainFocus = available[static_cast<std::size_t>(next)];
+    };
+
+    // Arrow keys move to the section that is actually in that direction. The
+    // boxes come from the last draw; when there is no candidate in that
+    // direction (Left/Right in a single stacked column) the authored order is
+    // the fallback.
+    auto sectionBox = [&](int node) -> Box {
+        if (node == kMainFocusProjects) {
+            return projectListBox;
+        }
+        if (node == kMainFocusRecent) {
+            return recentListBox;
+        }
+        if (node == kMainFocusQuickInput) {
+            return quickInputBox;
+        }
+        return kEmptyHitBox;
+    };
+
+    auto sectionAvailable = [&](int node) {
+        return !(node == kMainFocusRecent && recentMenuEntries.empty());
+    };
+
+    auto spatialNeighbor = [&](NavDir direction) -> int {
+        std::vector<Box> boxes(mainFocusOrder.size(), kEmptyHitBox);
+        for (int i = 0; i < static_cast<int>(mainFocusOrder.size()); ++i) {
+            const int node = mainFocusOrder[static_cast<std::size_t>(i)];
+            if (sectionAvailable(node)) {
+                boxes[static_cast<std::size_t>(i)] = sectionBox(node);
+            }
+        }
+        const int index = nearestBoxInDirection(boxes, mainFocus, direction);
+        return index < 0
+                   ? -1
+                   : mainFocusOrder[static_cast<std::size_t>(index)];
+    };
+
+    // Returns true when the focus actually moved.
+    auto focusDirection = [&](NavDir direction) -> bool {
+        const int target = spatialNeighbor(direction);
+        if (target >= 0) {
+            if (!setFocusNode(target)) {
+                return false;
+            }
+            return true;
+        }
+        const int before = mainFocus;
+        const int step =
+            (direction == NavDir::Left || direction == NavDir::Up) ? -1 : 1;
+        moveMainFocus(step, false);
+        return mainFocus != before;
+    };
+
+    // Actions such as E, Del, and move use mainSelected. When the recent list
+    // owns the focus, mirror its selection into mainSelected first.
+    auto syncSelectionFromFocus = [&]() {
+        if (focusIs(kMainFocusRecent) && recentSelected >= 0 &&
+            recentSelected <
+                static_cast<int>(recentProjectIndices.size())) {
+            mainSelected =
+                recentProjectIndices[static_cast<std::size_t>(recentSelected)];
+        }
+    };
+
+    // Mouse support on the main page. Hover focuses the section and the row
+    // under the pointer, a left click activates that row like Enter, and a
+    // right click opens the project action menu.
+    auto handleMainMouse = [&](Event& event) -> bool {
+        const Mouse& mouse = event.mouse();
+        const int projectRow = mouseRowAt(projectRowBoxes, mouse);
+        const int recentRow = mouseRowAt(recentRowBoxes, mouse);
+        const bool overProjectList = mouseInside(projectListBox, mouse);
+        const bool overRecentList = mouseInside(recentListBox, mouse);
+        const bool overQuickInput = mouseInside(quickInputBox, mouse);
+
+        // A grid owns its own cells: hovering must be able to focus it before
+        // it has the keyboard focus, which the component tree cannot do.
+        if (projectGrid && overProjectList &&
+            projectGrid->OnEvent(event)) {
+            return true;
+        }
+        if (recentGrid && overRecentList && !recentMenuEntries.empty() &&
+            recentGrid->OnEvent(event)) {
+            return true;
+        }
+
+        auto focusProjects = [&]() {
+            if (!setFocusNode(kMainFocusProjects)) {
+                mainFocus = 0;
+            }
+        };
+        auto focusRecent = [&]() {
+            if (!setFocusNode(kMainFocusRecent)) {
+                focusProjects();
+            }
+        };
+
+        if (mouse.button == Mouse::WheelUp ||
+            mouse.button == Mouse::WheelDown) {
+            // Move the focus to the wheeled section and let the Menu itself
+            // move the row, so its scrolling frame follows the selection.
+            if (projectRow >= 0) {
+                focusProjects();
+                clearProjectStatus();
+                return false;
+            }
+            if (recentRow >= 0) {
+                focusRecent();
+                clearProjectStatus();
+                return false;
+            }
+            if (overProjectList) {
+                focusProjects();
+                return true;
+            }
+            if (overRecentList && !recentMenuEntries.empty()) {
+                focusRecent();
+                return true;
+            }
+            return false;
+        }
+
+        if (mouse.button == Mouse::None && mouse.motion == Mouse::Moved) {
+            if (projectRow >= 0) {
+                focusProjects();
+                if (mainSelected != projectRow) {
+                    mainSelected = projectRow;
+                    clearProjectStatus();
+                }
+                return true;
+            }
+            if (recentRow >= 0) {
+                focusRecent();
+                if (recentSelected != recentRow) {
+                    recentSelected = recentRow;
+                    clearProjectStatus();
+                }
+                return true;
+            }
+            if (overQuickInput) {
+                if (!setFocusNode(kMainFocusQuickInput)) {
+                    focusProjects();
+                }
+                return true;
+            }
+            if (overProjectList) {
+                focusProjects();
+                return true;
+            }
+            if (overRecentList && !recentMenuEntries.empty()) {
+                focusRecent();
+                return true;
+            }
+            return false;
+        }
+
+        if (mouse.button == Mouse::Left && mouse.motion == Mouse::Pressed) {
+            if (projectRow >= 0) {
+                focusProjects();
+                clearProjectStatus();
+                if (projectRow < static_cast<int>(config.projects.size())) {
+                    mainSelected = projectRow;
+                    requestLaunch();
+                } else if (showAddProject) {
+                    beginAddProject();
+                }
+                return true;
+            }
+            if (recentRow >= 0 &&
+                recentRow < static_cast<int>(recentProjectIndices.size())) {
+                focusRecent();
+                recentSelected = recentRow;
+                clearProjectStatus();
+                requestLaunchIndex(
+                    recentProjectIndices[static_cast<std::size_t>(
+                        recentRow)]);
+                return true;
+            }
+            if (overProjectList) {
+                focusProjects();
+                return true;
+            }
+            if (overRecentList && !recentMenuEntries.empty()) {
+                focusRecent();
+                return true;
+            }
+            // Clicks on the quick-launch field belong to the Input component,
+            // which moves its text cursor there.
+            return false;
+        }
+
+        if (mouse.button == Mouse::Right && mouse.motion == Mouse::Pressed) {
+            if (projectRow >= 0 &&
+                projectRow < static_cast<int>(config.projects.size())) {
+                focusProjects();
+                mainSelected = projectRow;
+                clearProjectStatus();
+                beginProjectActions();
+                return true;
+            }
+            if (recentRow >= 0 &&
+                recentRow < static_cast<int>(recentProjectIndices.size())) {
+                focusRecent();
+                recentSelected = recentRow;
+                mainSelected =
+                    recentProjectIndices[static_cast<std::size_t>(
+                        recentRow)];
+                clearProjectStatus();
+                beginProjectActions();
+                return true;
+            }
+            return false;
+        }
+
+        return false;
+    };
+
+    // Run the project action at projectActionSelected. Enter and a mouse click
+    // both use this path.
+    auto activateProjectAction = [&]() {
+        if (projectActionSelected < 0 ||
+            projectActionSelected >=
+                static_cast<int>(config.menuTheme.actions.size())) {
+            return;
+        }
+        const MenuAction& action =
+            config.menuTheme.actions[static_cast<std::size_t>(
+                projectActionSelected)];
+        if (!trim(action.command).empty()) {
+            std::string projectPath;
+            if (mainSelected >= 0 &&
+                mainSelected < static_cast<int>(config.projects.size())) {
+                projectPath = pathToUtf8(
+                    config.resolveProjectPath(
+                        config.projects[static_cast<std::size_t>(
+                            mainSelected)]));
+            }
+            pendingLaunchIndex = mainSelected;
+            pendingCommand = expandCommandText(trim(action.command), config,
+                                               projectPath);
+            launchRequested = true;
+            switchPage(Page::Main);
+            screen.Exit();
+        } else if (action.id == "launch") {
+            requestLaunch();
+        } else if (action.id == "edit") {
+            beginEditProject(PathMode::Edit);
+        } else if (action.id == "rename") {
+            beginEditProject(PathMode::Rename);
+        } else if (action.id == "moveup") {
+            moveProject(-1, false);
+        } else if (action.id == "movedown") {
+            moveProject(1, false);
+        } else if (action.id == "movetop") {
+            moveProject(-1, true);
+        } else if (action.id == "movebottom") {
+            moveProject(1, true);
+        } else if (action.id == "remove") {
+            beginRemove();
+        } else if (action.id == "back") {
+            switchPage(Page::Main);
+        }
+    };
+
+    activateActionCallback = activateProjectAction;
+
+    auto root = CatchEvent(pages, [&](Event event) {
+        if (page == Page::Main) {
+            // Mouse-wheel focus can land on a section that just became empty;
+            // pull focus back to the project list.
+            if (focusIs(kMainFocusRecent) && recentMenuEntries.empty()) {
+                if (!setFocusNode(kMainFocusProjects)) {
+                    mainFocus = 0;
+                }
+            }
+            if (event.is_mouse() && handleMainMouse(event)) {
+                return true;
+            }
+            if (event == Event::Tab) {
+                moveMainFocus(+1, true);
+                return true;
+            }
+            if (event == Event::TabReverse) {
+                moveMainFocus(-1, true);
+                return true;
+            }
+
+            const bool quickFocused = focusIs(kMainFocusQuickInput);
+            if (quickFocused) {
+                // In the single-line input, Up/Down switch sections. When
+                // only Tab may switch, they keep their cursor movement and
+                // are swallowed at the ends instead of escaping the input.
+                if (event == Event::ArrowUp || event == Event::ArrowDown) {
+                    if (!tabOnlySectionSwitch) {
+                        focusDirection(event == Event::ArrowUp ? NavDir::Up
+                                                               : NavDir::Down);
+                        return true;
+                    }
+                    const bool atBoundary =
+                        event == Event::ArrowUp
+                            ? quickInputCursor <= 0
+                            : quickInputCursor >=
+                                  static_cast<int>(quickInput.size());
+                    return atBoundary;
+                }
+                if (event == Event::ArrowLeft || event == Event::ArrowRight) {
+                    // Left/Right edit the text; only at the ends do they act
+                    // like Up/Down and change sections.
+                    const bool left = event == Event::ArrowLeft;
+                    const bool atEdge =
+                        left ? quickInputCursor <= 0
+                             : quickInputCursor >=
+                                   static_cast<int>(quickInput.size());
+                    if (!atEdge) {
+                        return false;
+                    }
+                    if (!tabOnlySectionSwitch) {
+                        focusDirection(left ? NavDir::Left : NavDir::Right);
+                    }
+                    return true;
+                }
+                if (event == Event::PageUp || event == Event::PageDown) {
+                    // These have no meaning in a single-line field, and
+                    // letting them reach the container would jump sections.
+                    return true;
+                }
+                // Esc leaves the input instead of quitting the launcher, and
+                // every other key belongs to the text field.
+                if (event == Event::Escape) {
+                    if (!setFocusNode(kMainFocusProjects)) {
+                        mainFocus = 0;
+                    }
+                    return true;
+                }
+                return false;
+            }
+            if (eventMatchesAny(event,
+                                config.menuTheme.keys.quickInput)) {
+                if (setFocusNode(kMainFocusQuickInput)) {
+                    return true;
+                }
+            }
+            if (focusIs(kMainFocusRecent) && event == Event::Escape) {
+                if (!setFocusNode(kMainFocusProjects)) {
+                    mainFocus = 0;
+                }
+                return true;
+            }
+
+            // Arrows belong to the focused list while it can still move. Once
+            // it reaches an edge, the key moves the focus to the section that
+            // is actually in that direction.
+            if (event == Event::ArrowUp || event == Event::ArrowDown ||
+                event == Event::ArrowLeft || event == Event::ArrowRight) {
+                Component focusedList;
+                if (focusIs(kMainFocusProjects)) {
+                    focusedList = projectListComponent;
+                } else if (focusIs(kMainFocusRecent)) {
+                    focusedList = recentListComponent;
+                }
+
+                if (focusedList && focusedList->OnEvent(event)) {
+                    clearProjectStatus();
+                    return true;
+                }
+
+                NavDir direction = NavDir::Down;
+                if (event == Event::ArrowUp) {
+                    direction = NavDir::Up;
+                } else if (event == Event::ArrowLeft) {
+                    direction = NavDir::Left;
+                } else if (event == Event::ArrowRight) {
+                    direction = NavDir::Right;
+                }
+                if (focusDirection(direction)) {
+                    clearProjectStatus();
+                    return true;
+                }
+                if (tabOnlySectionSwitch) {
+                    return true;
+                }
+                // Nothing in that direction: keep Container::Vertical's own
+                // edge behavior for Up/Down.
+                return event == Event::ArrowLeft || event == Event::ArrowRight;
+            }
+            if (eventMatchesAny(event, config.menuTheme.keys.quit)) {
+                screen.Exit();
+                return true;
+            }
+            if (eventMatchesAny(event,
+                                config.menuTheme.keys.projectMenu)) {
+                syncSelectionFromFocus();
+                beginProjectActions();
+                return true;
+            }
+            if (eventMatchesAny(event, config.menuTheme.keys.remove)) {
+                syncSelectionFromFocus();
+                beginRemove();
+                return true;
+            }
+            if (eventMatchesAny(event, config.menuTheme.keys.add)) {
+                beginAddProject();
+                return true;
+            }
+            if (event == Event::ArrowUp || event == Event::ArrowDown) {
+                clearProjectStatus();
+            }
+            return false;
+        }
+
+        if (page == Page::Path) {
+            if (event.is_mouse() && dialogBar.handle(event)) {
+                return true;
+            }
+            if (event == Event::Tab || event == Event::TabReverse) {
+                if (!nameFieldShown) {
+                    return true;
+                }
+                // Rename keeps the focus on the name field.
+                if (pathMode == PathMode::Rename) {
+                    pathFocus = 1;
+                } else {
+                    pathFocus = pathFocus == 0 ? 1 : 0;
+                }
+                return true;
+            }
+            if (eventMatchesAny(event, config.menuTheme.keys.back)) {
+                pathCancelAction();
+                return true;
+            }
+            if (event == Event::Return) {
+                pathContinueAction();
+                return true;
+            }
+            return false;
+        }
+
+        if (page == Page::ConfirmCreate) {
+            if (event.is_mouse() && dialogBar.handle(event)) {
+                return true;
+            }
+            if (event == Event::Return ||
+                eventMatchesAny(event, config.menuTheme.keys.confirm)) {
+                createConfirmAction();
+                return true;
+            }
+            if (eventMatchesAny(event, config.menuTheme.keys.cancel)) {
+                createBackAction();
+                return true;
+            }
+            return false;
+        }
+
+        if (page == Page::ProjectActions) {
+            if (event.is_mouse() && actionGrid &&
+                actionGrid->OnEvent(event)) {
+                return true;
+            }
+            if (event.is_mouse()) {
+                const Mouse& mouse = event.mouse();
+                const int row = mouseRowAt(actionRowBoxes, mouse);
+                if (mouse.button == Mouse::None &&
+                    mouse.motion == Mouse::Moved) {
+                    if (row >= 0) {
+                        projectActionSelected = row;
+                        return true;
+                    }
+                    return false;
+                }
+                if (mouse.button == Mouse::Left &&
+                    mouse.motion == Mouse::Pressed) {
+                    if (row >= 0) {
+                        projectActionSelected = row;
+                        activateProjectAction();
+                        return true;
+                    }
+                    return false;
+                }
+                // Wheel events fall through to the Menu so it can move and
+                // scroll the selection.
+                return false;
+            }
+            if (eventMatchesAny(event, config.menuTheme.keys.back)) {
+                switchPage(Page::Main);
+                return true;
+            }
+            if (event == Event::Return) {
+                if (actionGrid) {
+                    // Let the component tree deliver Enter to the grid.
+                    return false;
+                }
+                activateProjectAction();
+                return true;
+            }
+            return false;
+        }
+
+        if (page == Page::ConfirmRemove) {
+            if (event.is_mouse() && dialogBar.handle(event)) {
+                return true;
+            }
+            if (event == Event::Return ||
+                eventMatchesAny(event, config.menuTheme.keys.confirm)) {
+                removeConfirmAction();
+                return true;
+            }
+            if (eventMatchesAny(event, config.menuTheme.keys.cancel)) {
+                removeCancelAction();
+                return true;
+            }
+            return false;
+        }
+
+        return false;
+    });
+
+    if (config.fileWasMissing()) {
+        std::string error;
+        if (config.save(error)) {
+            setStatus(
+                messageText(config.menuTheme, "configCreated",
+                            {{"config", pathToUtf8(config.configFile())}}),
+                false);
+        } else {
+            setStatus(error, true);
+        }
+    } else if (config.canRepair() && config.needsRepair()) {
+        std::string repairError;
+        if (config.repair(repairError)) {
+            refreshMenu();
+            refreshActions();
+            updatePathPlaceholder();
+            fs::path backup = config.configFile();
+            backup += ".before-fix";
+            setStatus(
+                messageText(config.menuTheme, "configRepaired",
+                            {{"backup", pathToUtf8(backup)}}),
+                false);
+        } else {
+            config.log("ERROR", "automatic config repair failed: " +
+                                    repairError);
+            setStatus(messageText(config.menuTheme, "configRepairFailed",
+                                  {{"error", repairError}}),
+                      true);
+        }
+    } else if (config.loadHadError()) {
+        setStatus(config.loadWarning(), true);
+    }
+
+    if (!config.themeStatus().empty()) {
+        config.log(config.themeStatusIsError() ? "ERROR" : "INFO",
+                   "theme: " + config.themeStatus());
+        if (config.themeStatusIsError()) {
+            if (!statusMessage.empty()) {
+                statusMessage += " ";
+            }
+            statusMessage += config.themeStatus();
+            statusIsError = true;
+        } else if (statusMessage.empty()) {
+            setStatus(config.themeStatus(), false);
+        }
+    }
+
+    clearScreen();
+
+    while (true) {
+        screen.Loop(root);
+        if (!launchRequested) {
+            break;
+        }
+        launchRequested = false;
+
+        const int launchIndex = pendingLaunchIndex;
+        pendingLaunchIndex = -1;
+        const fs::path oneOffPath = std::move(pendingLaunchPath);
+        pendingLaunchPath.clear();
+        const std::string command = std::move(pendingCommand);
+        pendingCommand.clear();
+        clearScreen();
+
+        if (oneOffPath.empty() &&
+            (launchIndex < 0 ||
+             launchIndex >= static_cast<int>(config.projects.size()))) {
+            setStatus(messageText(config.menuTheme, "projectUnavailable"),
+                      true);
+        } else {
+            const bool oneOff = !oneOffPath.empty();
+            fs::path projectPath = oneOffPath;
+            bool saved = true;
+            std::string saveError;
+
+            if (!oneOff) {
+                Project& project =
+                    config.projects[static_cast<std::size_t>(launchIndex)];
+                projectPath = config.resolveProjectPath(project);
+                config.log("INFO", "launch requested; project=" +
+                                       pathToUtf8(projectPath));
+                project.lastUsed = nowTimestamp();
+                saved = config.save(saveError);
+                if (!saved) {
+                    config.log("ERROR", "config save before launch failed: " +
+                                            saveError);
+                }
+            } else {
+                config.log("INFO", "quick launch requested; project=" +
+                                       pathToUtf8(projectPath));
+            }
+
+            LaunchResult result =
+                command.empty()
+                    ? launchClaude(config, projectPath)
+                    : runCustomProjectCommand(config, projectPath, command);
+
+            if (!result.started) {
+                setStatus(result.error.empty()
+                              ? messageText(config.menuTheme,
+                                            "claudeCouldNotStart")
+                              : result.error,
+                          true);
+            } else if (!result.error.empty()) {
+                setStatus(result.error, true);
+            } else if (result.exitCode == 0) {
+                setStatus(messageText(config.menuTheme,
+                                      command.empty() ? "claudeExited"
+                                                      : "actionExited"),
+                          false);
+            } else {
+                setStatus(messageText(config.menuTheme,
+                                      command.empty()
+                                          ? "claudeExitedWithCode"
+                                          : "actionExitedWithCode",
+                                      {{"code",
+                                        std::to_string(result.exitCode)}}),
+                          true);
+            }
+            if (!saved) {
+                if (!statusMessage.empty()) {
+                    statusMessage += " ";
+                }
+                statusMessage += messageText(
+                    config.menuTheme, "configSaveBeforeLaunchFailed",
+                    {{"error", saveError}});
+                statusIsError = true;
+            }
+            config.log("INFO", "launcher returned to the menu after launch");
+            refreshMenu();
+        }
+
+        clearScreen();
+        screen = ScreenInteractive::TerminalOutput();
+    }
+
+    config.log("INFO", "launcher exiting");
+    clearScreen();
+    return 0;
+}

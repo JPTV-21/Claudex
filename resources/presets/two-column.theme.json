@@ -1,0 +1,52 @@
+{
+  "titleFormat": "<bold><accent>Claude Code Portable Launcher</accent></bold>",
+  "titleAlign": "center",
+  "hintText": "<muted>Up/Down select, Enter launches, Tab switches sections.</muted>",
+  "footerAlign": "center",
+  "recentTitleFormat": "<muted>Recent</muted>",
+  "screens": {
+    "main": {
+      "width": 100,
+      "align": "center",
+      "border": "none",
+      "blocks": [
+        { "type": "title" },
+        { "type": "separator" },
+        {
+          "type": "hbox",
+          "children": [
+            {
+              "type": "box",
+              "border": "theme",
+              "width": 34,
+              "children": [
+                { "type": "projectList", "entryLines": ["{name}", "<muted>{path}</muted>"] }
+              ]
+            },
+            { "type": "separator", "vertical": true },
+            {
+              "type": "vbox",
+              "flex": true,
+              "children": [
+                {
+                  "type": "recentList",
+                  "title": "<muted>Recent</muted>",
+                  "entryLines": ["{name}", "<muted>{path}</muted>"],
+                  "separatorAfter": true
+                },
+                {
+                  "type": "quickInput",
+                  "title": "<muted>Quick launch</muted>",
+                  "label": ""
+                }
+              ]
+            }
+          ]
+        },
+        { "type": "separator" },
+        { "type": "statusOrHint" },
+        { "type": "footer" }
+      ]
+    }
+  }
+}

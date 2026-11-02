@@ -1,0 +1,291 @@
+{
+  "version": 1,
+  "variables": {
+    "black": "#000000",
+    "red": "#cc0000",
+    "green": "#00aa00",
+    "yellow": "#cccc00",
+    "blue": "#0000cc",
+    "magenta": "#cc00cc",
+    "cyan": "#00cccc",
+    "white": "#ffffff",
+    "graylight": "#c0c0c0",
+    "graydark": "#808080",
+    "gray": "graylight",
+    "grey": "graylight",
+    "greydark": "graydark",
+    "redlight": "#ff5555",
+    "greenlight": "#55ff55",
+    "yellowlight": "#ffff55",
+    "bluelight": "#5555ff",
+    "magentalight": "#ff55ff",
+    "cyanlight": "#55ffff",
+    "success": "green",
+    "error": "red",
+    "warning": "yellow",
+    "accent": "cyan",
+    "muted": "graydark",
+    "listHeight": 10
+  },
+  "addProjectLabel": "<success>+ Add project</success>",
+  "projectEntryFormat": "<path>",
+  "titleFormat": "<bold><accent>Claude Code Portable Launcher</accent></bold>",
+  "titleAlign": "center",
+  "borderStyle": "light",
+  "borderCharacters": "",
+  "separatorStyle": "light",
+  "separatorCharacter": "",
+  "activePrefix": "> ",
+  "inactivePrefix": "  ",
+  "hintText": "<muted>Up/Down select, Enter launches, Tab switches sections.</muted>",
+  "pathPlaceholder": "{drive}/Projects/my-project",
+  "footerAlign": "center",
+  "footerLines": [
+    "<muted>[Enter] Launch   [E] Project menu   [Del] Remove   [Tab] Switch section</muted>",
+    "<muted>[A] Add   [Q] Quit</muted>",
+    "<muted>Launcher: <root>   Claude: <claude></muted>",
+    "<muted>Log: <log></muted>"
+  ],
+  "recentTitleFormat": "<muted>Recent</muted>",
+  "recentEntryFormat": "<path>",
+  "recentEmptyText": "",
+  "recentLimit": 5,
+  "quickInputLabel": "<muted>Quick launch:</muted>",
+  "quickInputPlaceholder": "{drive}/Projects/my-project",
+  "projectNamePlaceholder": "Optional display name, markup allowed",
+  "pathContinueLabel": "<success>[Enter] Continue</success>",
+  "pathCancelLabel": "<muted>[Esc] Cancel</muted>",
+  "confirmCreateLabel": "<success>[Y] Create</success>",
+  "confirmCreateBackLabel": "<muted>[N] Back</muted>",
+  "confirmRemoveLabel": "<error>[Y] Remove</error>",
+  "confirmRemoveBackLabel": "<muted>[N] Cancel</muted>",
+  "keys": {
+    "quit": ["q", "esc"],
+    "projectMenu": ["e", "f2"],
+    "remove": ["delete"],
+    "add": ["a"],
+    "quickInput": ["tab"],
+    "confirm": ["y"],
+    "cancel": ["n", "esc"],
+    "back": ["esc"]
+  },
+  "screens": {
+    "main": {
+      "width": 100,
+      "align": "center",
+      "border": "theme",
+      "blocks": [
+        { "type": "title" },
+        { "type": "separator" },
+        {
+          "type": "projectList",
+          "maxHeight": "listHeight",
+          "entryLines": ["{name}", "<muted>{path}</muted>"]
+        },
+        {
+          "type": "quickInput",
+          "title": "<muted>Quick launch</muted>",
+          "label": "",
+          "separatorBefore": true
+        },
+        {
+          "type": "recentList",
+          "separatorBefore": true,
+          "entryLines": ["{name}", "<muted>{path}</muted>"]
+        },
+        { "type": "separator" },
+        { "type": "statusOrHint" },
+        { "type": "footer" }
+      ]
+    },
+    "path": {
+      "width": 88,
+      "align": "center",
+      "border": "light",
+      "addTitle": "Add project",
+      "editTitle": "Edit project",
+      "renameTitle": "Rename project",
+      "blocks": [
+        { "type": "text", "text": "<bold><accent>{mode}</accent></bold>", "align": "center" },
+        { "type": "separator" },
+        { "type": "text", "text": "<dim>Project name (optional)</dim>" },
+        {
+          "type": "box",
+          "border": "light",
+          "children": [
+            { "type": "nameInput" }
+          ]
+        },
+        { "type": "blank" },
+        { "type": "text", "text": "<dim>Folder path</dim>" },
+        {
+          "type": "box",
+          "border": "light",
+          "children": [
+            { "type": "pathInput" }
+          ]
+        },
+        {
+          "type": "error",
+          "fallback": "<dim> Relative paths are resolved from the launcher folder.</dim>"
+        },
+        { "type": "separator" },
+        { "type": "buttons" }
+      ]
+    },
+    "confirmCreate": {
+      "width": 88,
+      "align": "center",
+      "border": "light",
+      "blocks": [
+        { "type": "text", "text": "<bold><warning>Folder does not exist</warning></bold>", "align": "center" },
+        { "type": "separator" },
+        { "type": "text", "text": " {path}" },
+        { "type": "blank" },
+        { "type": "text", "text": "Create this folder and add it as a project?", "align": "center" },
+        { "type": "blank" },
+        { "type": "buttons" }
+      ]
+    },
+    "projectActions": {
+      "width": 88,
+      "align": "center",
+      "border": "theme",
+      "blocks": [
+        {
+          "type": "vbox",
+          "separatorAfter": true,
+          "children": [
+            { "type": "title", "scope": "project" },
+            { "type": "projectFormat" }
+          ]
+        },
+        {
+          "type": "box",
+          "border": "theme",
+          "width": 48,
+          "align": "center",
+          "children": [
+            { "type": "actionList" }
+          ]
+        },
+        {
+          "type": "footer",
+          "scope": "project",
+          "separatorBefore": true
+        }
+      ]
+    },
+    "confirmRemove": {
+      "width": 88,
+      "align": "center",
+      "border": "light",
+      "blocks": [
+        { "type": "text", "text": "<bold><warning>Remove project?</warning></bold>", "align": "center" },
+        { "type": "separator" },
+        { "type": "text", "text": " {path}" },
+        { "type": "blank" },
+        { "type": "text", "text": "<dim>The folder itself is not deleted.</dim>", "align": "center" },
+        { "type": "blank" },
+        { "type": "buttons" }
+      ]
+    }
+  },
+  "messages": {
+    "selectProjectFirst": "<warning>Select a project first.</warning>",
+    "projectAdded": "<success>Project added.</success>",
+    "projectPathUpdated": "<success>Project path updated.</success>",
+    "projectNameUpdated": "<success>Project name updated.</success>",
+    "projectRemoved": "<success>Project removed.</success>",
+    "projectMoved": "<success>Project moved.</success>",
+    "projectAlreadyFirst": "<warning>The project is already at the top.</warning>",
+    "projectAlreadyLast": "<warning>The project is already at the bottom.</warning>",
+    "projectAddedSaveFailed": "<error>Project added in memory, but the config could not be saved: {error}</error>",
+    "projectUnavailable": "<error>The selected project is no longer available.</error>",
+    "projectNoLongerListed": "<error>The project is no longer in the list.</error>",
+    "enterFolderPath": "<error>Enter a folder path.</error>",
+    "invalidFolderPath": "<error>Invalid folder path.</error>",
+    "quickPathEmpty": "<error>Type a folder path to launch once.</error>",
+    "quickPathNotFound": "<error>Folder not found: {path}</error>",
+    "pathNotFolder": "<error>That path is not a folder: {path}</error>",
+    "pathInspectFailed": "<error>Could not inspect {path}: {error}</error>",
+    "pathCreateFailed": "<error>Could not create {path}: {error}</error>",
+    "configCreated": "<success>Created {config}.</success>",
+    "configRepaired": "<success>Config repaired automatically. Backup: {backup}</success>",
+    "configRepairFailed": "<error>Automatic config repair failed: {error}</error>",
+    "configSaveBeforeLaunchFailed": "<error>Config could not be saved: {error}</error>",
+    "claudeExited": "<success>Claude exited.</success>",
+    "claudeExitedWithCode": "<success>Claude exited with code {code}.</success>",
+    "claudeCouldNotStart": "<error>Claude could not be started.</error>",
+    "actionExited": "<success>Command exited.</success>",
+    "actionExitedWithCode": "<success>Command exited with code {code}.</success>",
+    "configInspectFailed": "<error>Could not inspect config file {path}: {error}</error>",
+    "configOpenFailed": "<error>Could not open config file {path}</error>",
+    "configOldArrayFormat": "<error>This config uses the old project-array format and was not migrated. Create a new JSON object config instead.</error>",
+    "configUnsupportedFormat": "<error>Unsupported config format. Expected a JSON object.</error>",
+    "configProjectsNotArray": "<warning>The config's \"projects\" field is not an array; ignoring it.</warning>",
+    "configParseFailed": "<error>Could not parse config file {path}: {error}</error>",
+    "configCannotRepair": "<error>This config cannot be repaired automatically. {warning}</error>",
+    "configBackupFailed": "<error>Could not back up the current config to {backup}: {error}</error>",
+    "configFolderCreateFailed": "<error>Could not create config folder {path}: {error}</error>",
+    "configSerializeFailed": "<error>Could not serialize config: {error}</error>",
+    "configWriteFailed": "<error>Could not write config file {path}</error>",
+    "configFinishWriteFailed": "<error>Could not finish writing config file {path}</error>",
+    "configInvalidBackupFailed": "<error>The existing config is invalid, and it could not be backed up to {backup}: {error}. Refusing to overwrite it.</error>",
+    "configReplaceFailed": "<error>Could not replace {path}: {error}</error>",
+    "themeCreated": "<success>Created theme file {path}.</success>",
+    "themeRepaired": "<success>Theme repaired automatically. Backup: {backup}</success>",
+    "themeInspectFailed": "<error>Could not inspect theme file {path}: {error}</error>",
+    "themeOpenFailed": "<error>Could not open theme file {path}</error>",
+    "themeParseFailed": "<error>Could not parse theme file {path}: {error}</error>",
+    "themeUnsupportedFormat": "<error>Unsupported theme format. Expected a JSON object.</error>",
+    "themePathEmpty": "<error>Theme path is empty.</error>",
+    "themeFolderCreateFailed": "<error>Could not create theme folder {path}: {error}</error>",
+    "themeBackupFailed": "<error>Could not back up the current theme to {backup}: {error}</error>",
+    "themeInvalidBackupFailed": "<error>The existing theme is invalid, and it could not be backed up to {backup}: {error}. Refusing to overwrite it.</error>",
+    "themeSerializeFailed": "<error>Could not serialize theme: {error}</error>",
+    "themeWriteFailed": "<error>Could not write theme file {path}</error>",
+    "themeFinishWriteFailed": "<error>Could not finish writing theme file {path}</error>",
+    "themeReplaceFailed": "<error>Could not replace {path}: {error}</error>",
+    "claudeNotRunnable": "<error>Claude executable is not runnable: {path}</error>",
+    "claudePathNotFound": "<error>Claude executable not found: {path}. Set claudePath or check claudeExclude in the config file.</error>",
+    "claudeNotFound": "<error>Claude executable was not found. Set claudePath or check claudeExclude in the config file.</error>",
+    "claudeAmbiguous": "<error>Multiple executables were found in {path}: {candidates}. Point claudePath at the binary or use a more specific pattern.</error>",
+    "pathPatternNoMatch": "<error>Path pattern matched nothing: {value}</error>",
+    "pathPatternAmbiguous": "<error>Path pattern matched multiple folders: {value} ({candidates}). Use a more specific path.</error>",
+    "claudeProjectMissing": "<error>Project folder does not exist: {path}</error>",
+    "environmentVariableFailed": "<error>Could not set environment variable {name}: {error}</error>",
+    "createFolderFailed": "<error>Could not create folder {path}: {error}</error>",
+    "notAFolder": "<error>Not a folder: {path}</error>",
+    "claudeStartFailed": "<error>Could not start Claude: {error}</error>",
+    "claudeWaitFailed": "<error>Could not wait for Claude: {error}</error>",
+    "claudeExitCodeUnreadable": "<error>Claude ran, but its exit code could not be read: {error}</error>"
+  },
+  "projectMenu": {
+    "titleFormat": "<bold><accent>What to do with this project?</accent></bold>",
+    "projectFormat": "<muted><project></muted>",
+    "launchLabel": "Launch Claude",
+    "editLabel": "Edit project",
+    "renameLabel": "Rename",
+    "removeLabel": "Remove from list",
+    "backLabel": "Back",
+    "moveUpLabel": "Move up",
+    "moveDownLabel": "Move down",
+    "moveTopLabel": "Move to top",
+    "moveBottomLabel": "Move to bottom",
+    "actions": [
+      { "id": "launch" },
+      { "id": "edit" },
+      { "id": "rename" },
+      { "id": "moveUp" },
+      { "id": "moveDown" },
+      { "id": "moveTop" },
+      { "id": "moveBottom" },
+      { "id": "remove" },
+      { "id": "back" }
+    ],
+    "footerLines": [
+      "<muted>[Up/Down] Select   [Enter] Choose   [Esc] Back</muted>"
+    ]
+  }
+}

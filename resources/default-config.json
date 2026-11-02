@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "theme": "claudex-theme.json",
+  "claudePath": ["claude*"],
+  "claudeExclude": ["ClaudeX*"],
+  "launchCommand": {
+    "windows": "set \"CLAUDE_CONFIG_DIR={claudeConfigDir}\" && set \"TEMP={tempDir}\" && set \"TMP={tempDir}\" && set \"TMPDIR={tempDir}\" && {claude}",
+    "posix": "CLAUDE_CONFIG_DIR='{claudeConfigDir}' TEMP='{tempDir}' TMP='{tempDir}' TMPDIR='{tempDir}' {claude}"
+  },
+  "claudeConfigDir": "data",
+  "tempDir": "data/tmp",
+  "logFile": "claudex.log",
+  "tabOnlySectionSwitch": false,
+  "projects": []
+}

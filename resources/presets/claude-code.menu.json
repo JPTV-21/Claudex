@@ -1,0 +1,60 @@
+{
+  "hintText": "<dim>Enter launch   A add project   E actions   Q quit</dim>",
+  "footerAlign": "left",
+  "footerLines": [
+    "<dim>? for shortcuts</dim>"
+  ],
+  "screens": {
+    "main": {
+      "width": 100,
+      "align": "left",
+      "border": "none",
+      "blocks": [
+        {
+          "type": "box",
+          "border": "rounded",
+          "width": 74,
+          "children": [
+            {
+              "type": "text",
+              "text": " <bold><accent>✻ Welcome to ClaudeX!</accent></bold>"
+            },
+            { "type": "blank" },
+            {
+              "type": "text",
+              "text": " <dim>Select a project below, or press A to add one.</dim>"
+            },
+            { "type": "blank" },
+            {
+              "type": "text",
+              "text": " <dim>cwd:</dim> {path}"
+            }
+          ]
+        },
+        { "type": "blank" },
+        {
+          "type": "projectList",
+          "height": 8,
+          "entryLines": ["{name}", "<muted>{path}</muted>"],
+          "activePrefix": " > ",
+          "inactivePrefix": "   "
+        },
+        {
+          "type": "quickInput",
+          "title": "<dim>Quick launch</dim>",
+          "label": "",
+          "separatorBefore": true
+        },
+        {
+          "type": "recentList",
+          "limit": 3,
+          "entryLines": ["{name}", "<muted>{path}</muted>"],
+          "title": "<dim>Recent</dim>",
+          "separatorBefore": true
+        },
+        { "type": "statusOrHint" },
+        { "type": "footer" }
+      ]
+    }
+  }
+}
