@@ -1413,6 +1413,18 @@ size_t App::Internal::FetchTerminalEvents() {
         if (key_event.bKeyDown == FALSE) {
           continue;
         }
+        // Windows reports Shift+Enter as a plain '\r', which FTXUI cannot
+        // tell apart from Enter. Forwarding the CSI-u spelling lets the
+        // application insert a line break; unknown sequences are delivered as
+        // Event::Special.
+        if (key_event.wVirtualKeyCode == VK_RETURN &&
+            (key_event.dwControlKeyState & SHIFT_PRESSED) != 0) {
+          static constexpr char kShiftEnter[] = "\x1b[13;2u";
+          for (const char c : std::string_view(kShiftEnter)) {
+            terminal_input_parser.Add(c);
+          }
+          continue;
+        }
         const wchar_t wc = key_event.uChar.UnicodeChar;
         wstring += wc;
         if (wc >= 0xd800 && wc <= 0xdbff) {

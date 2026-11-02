@@ -47,6 +47,39 @@ constexpr int kMainFocusProjects = 0;
 constexpr int kMainFocusRecent = 1;
 constexpr int kMainFocusQuickInput = 2;
 
+// Input fields on the path screen. The theme decides which ones exist and in
+// which order, so Up/Down and Tab follow the drawn layout.
+enum class PathField { Name, Path };
+
+void collectPathFieldOrder(const json& blocks, std::vector<PathField>& order) {
+    if (!blocks.is_array()) {
+        return;
+    }
+    for (const json& block : blocks) {
+        if (!block.is_object()) {
+            continue;
+        }
+        const std::string type =
+            normalizeMenuToken(jsonStringField(block, "type", ""));
+        PathField field = PathField::Path;
+        bool found = false;
+        if (type == "nameinput") {
+            field = PathField::Name;
+            found = true;
+        } else if (type == "pathinput") {
+            field = PathField::Path;
+            found = true;
+        }
+        if (found && std::find(order.begin(), order.end(), field) ==
+                         order.end()) {
+            order.push_back(field);
+        }
+        if (block.contains("children") && block["children"].is_array()) {
+            collectPathFieldOrder(block["children"], order);
+        }
+    }
+}
+
 void collectMainFocusOrder(const json& blocks, std::vector<int>& order) {
     if (!blocks.is_array()) {
         return;
@@ -300,8 +333,11 @@ int main(int argc, char** argv) {
     std::string pathError;
     int pathCursor = 0;
     int nameCursor = 0;
-    // 0 = path field, 1 = name field.
+    // Index into pathFieldOrder: the name and path inputs in the order the
+    // theme draws them. Rename makes the path read-only, so it leaves the
+    // focus order there.
     int pathFocus = 0;
+    bool pathFieldFocusable = true;
     enum class PathMode { Add, Edit, Rename };
     PathMode pathMode = PathMode::Add;
     int pathEditIndex = -1;
@@ -358,6 +394,19 @@ int main(int argc, char** argv) {
     // boundary jumps and Tab agree with what is drawn on screen.
     std::vector<int> mainFocusOrder;
     collectMainFocusOrder(screenBlocks("main"), mainFocusOrder);
+
+    std::vector<PathField> pathFieldOrder;
+    collectPathFieldOrder(screenBlocks("path"), pathFieldOrder);
+    if (pathFieldOrder.empty()) {
+        pathFieldOrder.push_back(PathField::Path);
+    }
+    auto pathFieldIndex = [&](PathField field) -> int {
+        auto found = std::find(pathFieldOrder.begin(), pathFieldOrder.end(),
+                               field);
+        return found == pathFieldOrder.end()
+                   ? -1
+                   : static_cast<int>(found - pathFieldOrder.begin());
+    };
 
     auto focusIndexOf = [&](int node) -> int {
         auto found =
@@ -443,6 +492,16 @@ int main(int argc, char** argv) {
             ? stringListField(*recentListBlock, "entryLines", {})
             : std::vector<std::string>{};
 
+    // projectNameDisplay controls where the optional name line appears.
+    // Passing an empty name makes expandEntryLines drop a line that consists
+    // only of {name}, as it already does for unnamed projects.
+    const ProjectNameDisplay nameDisplay =
+        config.menuTheme.projectNameDisplay;
+    const bool pinnedNamesShown = nameDisplay == ProjectNameDisplay::Both ||
+                                  nameDisplay == ProjectNameDisplay::Pinned;
+    const bool recentNamesShown = nameDisplay == ProjectNameDisplay::Both ||
+                                  nameDisplay == ProjectNameDisplay::Recent;
+
     auto projectLinesFor = [&](int index,
                                const std::string& raw) -> std::vector<std::string> {
         if (index < 0 || index >= static_cast<int>(config.projects.size())) {
@@ -453,8 +512,10 @@ int main(int argc, char** argv) {
         const std::vector<std::string>& lines =
             projectEntryLines.empty() ? std::vector<std::string>{listEntryFormat}
                                       : projectEntryLines;
-        return expandEntryLines(lines, project.name, project.path,
-                                project.lastUsed, &config.menuTheme.variables);
+        return expandEntryLines(lines,
+                                pinnedNamesShown ? project.name : std::string(),
+                                project.path, project.lastUsed,
+                                &config.menuTheme.variables);
     };
 
     auto recentLinesFor = [&](int index) -> std::vector<std::string> {
@@ -467,8 +528,10 @@ int main(int argc, char** argv) {
         const std::vector<std::string>& lines =
             recentEntryLines.empty() ? std::vector<std::string>{recentEntryFormat}
                                      : recentEntryLines;
-        return expandEntryLines(lines, project.name, project.path,
-                                project.lastUsed, &config.menuTheme.variables);
+        return expandEntryLines(lines,
+                                recentNamesShown ? project.name : std::string(),
+                                project.path, project.lastUsed,
+                                &config.menuTheme.variables);
     };
 
     const std::string recentActivePrefix =
@@ -727,7 +790,8 @@ int main(int argc, char** argv) {
         projectName.clear();
         pathCursor = 0;
         nameCursor = 0;
-        pathFocus = 0;
+        pathFieldFocusable = true;
+        pathFocus = std::max(0, pathFieldIndex(PathField::Path));
         pathError.clear();
         pendingPath.clear();
         updatePathPlaceholder();
@@ -761,7 +825,10 @@ int main(int argc, char** argv) {
         projectName = project.name;
         pathCursor = static_cast<int>(pathInput.size());
         nameCursor = static_cast<int>(projectName.size());
-        pathFocus = mode == PathMode::Rename ? 1 : 0;
+        pathFieldFocusable = mode != PathMode::Rename;
+        const int preferredField = pathFieldIndex(
+            mode == PathMode::Rename ? PathField::Name : PathField::Path);
+        pathFocus = std::max(0, preferredField);
         pathError.clear();
         pendingPath.clear();
         updatePathPlaceholder();
@@ -1281,17 +1348,19 @@ int main(int argc, char** argv) {
     auto nameInputComponent =
         Input(&projectName, &projectNamePlaceholder, nameInputOptions);
 
-    // Both fields share the path page; Tab moves between them. A custom path
-    // screen may not lay out the name block, in which case the field is left
-    // out of the container so the focus cannot land on something invisible.
-    const bool nameFieldShown =
-        findBlockByType(screenThemeFor(config.menuTheme, "path").blocks,
-                        "nameInput") != nullptr;
+    // Both fields share the path page. Build the container in the authored
+    // block order so Up/Down and Tab move in the direction the fields are
+    // drawn. A block the theme leaves out is not focusable, and Rename wraps
+    // the path input in Maybe so its read-only text cannot take the focus.
+    auto pathFocusComponent = Maybe(pathInputComponent, &pathFieldFocusable);
+    Components pathFieldComponents;
+    for (const PathField field : pathFieldOrder) {
+        pathFieldComponents.push_back(field == PathField::Name
+                                          ? nameInputComponent
+                                          : pathFocusComponent);
+    }
     auto pathFields =
-        nameFieldShown
-            ? Container::Vertical({pathInputComponent, nameInputComponent},
-                                  &pathFocus)
-            : Container::Vertical({pathInputComponent}, &pathFocus);
+        Container::Vertical(pathFieldComponents, &pathFocus);
 
     InputOption quickInputOptions;
     quickInputOptions.multiline = false;
@@ -1798,7 +1867,76 @@ int main(int argc, char** argv) {
 
     activateActionCallback = activateProjectAction;
 
+    auto pathFieldFocused = [&]() -> PathField {
+        const int index = std::clamp(
+            pathFocus, 0, static_cast<int>(pathFieldOrder.size()) - 1);
+        return pathFieldOrder[static_cast<std::size_t>(index)];
+    };
+    auto pathFieldSelectable = [&](PathField field) {
+        // Rename shows the path read-only, so it is not a focus target.
+        return field == PathField::Name || pathFieldFocusable;
+    };
+    // Moves the path-screen focus one field in the authored layout order.
+    auto movePathField = [&](int step, bool wrap) -> bool {
+        const int count = static_cast<int>(pathFieldOrder.size());
+        if (count == 0) {
+            return false;
+        }
+        int index = std::clamp(pathFocus, 0, count - 1);
+        for (int attempt = 0; attempt < count; ++attempt) {
+            index += step;
+            if (wrap) {
+                index = (index % count + count) % count;
+            } else if (index < 0 || index >= count) {
+                return false;
+            }
+            if (pathFieldSelectable(
+                    pathFieldOrder[static_cast<std::size_t>(index)])) {
+                pathFocus = index;
+                return true;
+            }
+        }
+        return false;
+    };
+    // True when the caret has another wrapped line in that direction, in
+    // which case the Input should move the cursor instead of the focus.
+    auto cursorHasLine = [](const std::string& text, int cursor, bool down) {
+        const std::size_t position = static_cast<std::size_t>(
+            std::clamp(cursor, 0, static_cast<int>(text.size())));
+        if (down) {
+            return position < text.size() &&
+                   text.find('\n', position) != std::string::npos;
+        }
+        return position > 0 &&
+               text.rfind('\n', position - 1) != std::string::npos;
+    };
+    auto insertLineBreak = [](std::string& text, int& cursor) {
+        const int position =
+            std::clamp(cursor, 0, static_cast<int>(text.size()));
+        text.insert(static_cast<std::size_t>(position), 1, '\n');
+        cursor = position + 1;
+    };
+
     auto root = CatchEvent(pages, [&](Event event) {
+        // Shift+Enter always inserts a literal line break instead of
+        // submitting or moving the focus.
+        if (isShiftEnter(event)) {
+            if (page == Page::Main && focusIs(kMainFocusQuickInput)) {
+                insertLineBreak(quickInput, quickInputCursor);
+                return true;
+            }
+            if (page == Page::Path) {
+                if (pathFieldFocused() == PathField::Name) {
+                    insertLineBreak(projectName, nameCursor);
+                    return true;
+                }
+                if (pathFieldFocusable) {
+                    insertLineBreak(pathInput, pathCursor);
+                    return true;
+                }
+            }
+            return false;
+        }
         if (page == Page::Main) {
             // Mouse-wheel focus can land on a section that just became empty;
             // pull focus back to the project list.
@@ -1821,20 +1959,30 @@ int main(int argc, char** argv) {
 
             const bool quickFocused = focusIs(kMainFocusQuickInput);
             if (quickFocused) {
-                // In the single-line input, Up/Down switch sections. When
-                // only Tab may switch, they keep their cursor movement and
-                // are swallowed at the ends instead of escaping the input.
+                // Up/Down first walk the wrapped lines of a multi-line value;
+                // at the first/last line they switch sections. A single-line
+                // field keeps its cursor-to-end behavior when Tab is the only
+                // section switch.
                 if (event == Event::ArrowUp || event == Event::ArrowDown) {
+                    const bool down = event == Event::ArrowDown;
+                    if (quickInput.find('\n') != std::string::npos) {
+                        if (cursorHasLine(quickInput, quickInputCursor,
+                                          down)) {
+                            return false;
+                        }
+                        if (!tabOnlySectionSwitch) {
+                            focusDirection(down ? NavDir::Down : NavDir::Up);
+                        }
+                        return true;
+                    }
                     if (!tabOnlySectionSwitch) {
-                        focusDirection(event == Event::ArrowUp ? NavDir::Up
-                                                               : NavDir::Down);
+                        focusDirection(down ? NavDir::Down : NavDir::Up);
                         return true;
                     }
                     const bool atBoundary =
-                        event == Event::ArrowUp
-                            ? quickInputCursor <= 0
-                            : quickInputCursor >=
-                                  static_cast<int>(quickInput.size());
+                        down ? quickInputCursor >=
+                                   static_cast<int>(quickInput.size())
+                             : quickInputCursor <= 0;
                     return atBoundary;
                 }
                 if (event == Event::ArrowLeft || event == Event::ArrowRight) {
@@ -1946,16 +2094,33 @@ int main(int argc, char** argv) {
             if (event.is_mouse() && dialogBar.handle(event)) {
                 return true;
             }
-            if (event == Event::Tab || event == Event::TabReverse) {
-                if (!nameFieldShown) {
-                    return true;
+            if (event == Event::Tab) {
+                movePathField(+1, true);
+                return true;
+            }
+            if (event == Event::TabReverse) {
+                movePathField(-1, true);
+                return true;
+            }
+            if (event == Event::ArrowUp || event == Event::ArrowDown ||
+                event == Event::PageUp || event == Event::PageDown) {
+                const bool down = event == Event::ArrowDown ||
+                                  event == Event::PageDown;
+                const PathField field = pathFieldFocused();
+                // Page keys never scroll a single field in FTXUI, so they
+                // always move the focus. Arrows stay inside wrapped lines
+                // until the first or last one.
+                const bool arrow =
+                    event == Event::ArrowUp || event == Event::ArrowDown;
+                if (arrow && field == PathField::Name) {
+                    if (cursorHasLine(projectName, nameCursor, down)) {
+                        return false;
+                    }
+                } else if (arrow && pathFieldFocusable &&
+                           cursorHasLine(pathInput, pathCursor, down)) {
+                    return false;
                 }
-                // Rename keeps the focus on the name field.
-                if (pathMode == PathMode::Rename) {
-                    pathFocus = 1;
-                } else {
-                    pathFocus = pathFocus == 0 ? 1 : 0;
-                }
+                movePathField(down ? +1 : -1, false);
                 return true;
             }
             if (eventMatchesAny(event, config.menuTheme.keys.back)) {

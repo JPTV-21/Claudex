@@ -29,6 +29,7 @@
   },
   "addProjectLabel": "<success>+ Add project</success>",
   "projectEntryFormat": "<path>",
+  "projectNameDisplay": "both",
   "titleFormat": "<bold><accent>Claude Code Portable Launcher</accent></bold>",
   "titleAlign": "center",
   "borderStyle": "light",

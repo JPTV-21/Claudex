@@ -338,6 +338,12 @@ MenuTheme menuThemeFromDocument(const json& document,
         document.at("addProjectLabel").get<std::string>();
     theme.projectEntryFormat =
         document.at("projectEntryFormat").get<std::string>();
+    theme.projectNameDisplay = projectNameDisplayFromText(
+        jsonStringField(document, "projectNameDisplay",
+                        defaults ? projectNameDisplayText(
+                                       defaults->projectNameDisplay)
+                                 : "both"),
+        defaults ? defaults->projectNameDisplay : ProjectNameDisplay::Both);
     theme.titleFormat = document.at("titleFormat").get<std::string>();
     theme.titleAlign = document.at("titleAlign").get<std::string>();
     theme.borderStyle = document.at("borderStyle").get<std::string>();

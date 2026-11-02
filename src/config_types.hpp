@@ -79,6 +79,11 @@ struct ScreenTheme {
     json blocks = json::array();
 };
 
+// Where a project's optional display name is rendered. Recent rows reuse the
+// same project data as the pinned list, so the theme can keep names in one
+// place or hide them entirely.
+enum class ProjectNameDisplay { Both, Pinned, Recent, None };
+
 struct KeyBindings {
     std::vector<std::string> quit;
     std::vector<std::string> projectMenu;
@@ -97,6 +102,7 @@ struct MenuTheme {
     std::vector<std::string> warnings;
     std::string addProjectLabel;
     std::string projectEntryFormat;
+    ProjectNameDisplay projectNameDisplay = ProjectNameDisplay::Both;
     std::string titleFormat;
     std::string titleAlign;
     std::string borderStyle;
@@ -134,6 +140,13 @@ std::string messageText(const MenuTheme& theme, const char* key);
 std::string messageText(
     const MenuTheme& theme, const char* key,
     std::initializer_list<std::pair<std::string, std::string>> values);
+
+// Accepts "both"/"all", "pinned"/"projects", "recent", and
+// "none"/"hidden"/"off" (case- and separator-insensitive). Unknown values
+// return |fallback| so an older theme keeps the built-in behavior.
+ProjectNameDisplay projectNameDisplayFromText(const std::string& text,
+                                              ProjectNameDisplay fallback);
+std::string projectNameDisplayText(ProjectNameDisplay display);
 
 std::string jsonStringField(const json& object, const char* key,
                             const std::string& fallback);

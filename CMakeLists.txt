@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(ClaudeX VERSION 1.0.0 LANGUAGES CXX)
+project(ClaudeX VERSION 1.1.0 LANGUAGES CXX)
 
 set(CLAUDEX_AUTHOR "Wind_Blood")
 

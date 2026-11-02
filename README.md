@@ -54,10 +54,13 @@ Recent
   selection but draw it with the inactive prefix.
 - `+ Add project` is always the last row and can be reached with the arrow keys.
 - The add/edit screen has two fields: the optional project name and the folder
-  path. `Tab`/`Shift+Tab` move between them; Enter saves and Esc cancels. The
-  name is markup, so a project can carry its own color. `E` → `Edit project`
-  opens both fields; `E` → `Rename` opens the same screen with the path shown
-  read-only.
+  path. `Up`/`Down` move between the fields in the order they are drawn (and
+  first walk the wrapped lines of a multi-line value); `Tab`/`Shift+Tab` cycle
+  through them. Enter saves and Esc cancels. `Shift+Enter` inserts a line break
+  in any input field without submitting. The name is markup, so a project can
+  carry its own color. `E` → `Edit project` opens both fields; `E` → `Rename`
+  opens the same screen with the path shown read-only, so the name is the only
+  focus target.
 - The input placeholders come from the theme's `pathPlaceholder` (default
   `{drive}/Projects/my-project`, so it follows the launcher's drive) and
   `projectNamePlaceholder`.
@@ -72,6 +75,7 @@ Other keys:
 
 | Key | Action |
 | --- | --- |
+| `Shift+Enter` | Insert a line break in the focused input instead of submitting (`Alt+Enter` works where the terminal does not report Shift+Enter) |
 | `Tab` / `Shift+Tab` | Cycle focus between sections in the order they appear in the layout |
 | `Up` / `Down` | Move inside the focused section; at its first/last row, move to the adjacent section |
 | `Left` / `Right` | Move within a grid row; on a single-column list they change sections. In the quick-launch field they move the text cursor, and only at the ends do they change sections |
@@ -127,7 +131,9 @@ console API on Windows and ANSI clear sequences on Linux/macOS, so Claude and
 Claudex do not share half of the screen.
 
 The vendored FTXUI copy has its DECRQSS cursor-shape query disabled because
-unsupported terminals print the query payload (`$q q`) onto the screen.
+unsupported terminals print the query payload (`$q q`) onto the screen. It
+also forwards Windows Shift+Enter as a CSI-u sequence (`\x1b[13;2u`), which
+FTXUI has no built-in event for; the launcher uses it to insert a line break.
 
 ## Quick start
 
@@ -322,6 +328,7 @@ with tags instead of separate `titleColor`, `titleBold`, etc. keys:
 {
   "addProjectLabel": "<success>+ Add project</success>",
   "projectEntryFormat": "<path>",
+  "projectNameDisplay": "both",
   "titleFormat": "<bold><orange>------ ClaudeX ------</orange></bold>",
   "titleAlign": "center",
   "borderStyle": "double",
@@ -365,6 +372,7 @@ with tags instead of separate `titleColor`, `titleBold`, etc. keys:
 | `separatorCharacter` | Overrides the separator style with a repeated character, for example `-`. |
 | `activePrefix` / `inactivePrefix` | Prefixes for the active row and normal rows; markup is allowed. Only the focused section uses `activePrefix`, so exactly one row looks active across the whole screen. |
 | `projectEntryFormat` | Project row template for single-line rows. Use `<path>`/`{path}` and `<name>`/`{name}`; markup is allowed. `projectList.entryLines` (see below) builds multi-line rows and takes priority. |
+| `projectNameDisplay` | Where the optional project name is drawn: `both` (default; pinned and recent lists), `pinned` (project list only), `recent` (recent list only), or `none`. When a list does not show names, `{name}`/`<name>` expands to nothing and a line made only of it is dropped. |
 | `addProjectLabel` | Label for the final add-project row; markup is allowed. |
 | `hintText` | Hint line shown when there is no status. |
 | `projectNamePlaceholder` | Hint shown in the project-name field on the add/edit screen. Path templates are expanded. |
@@ -539,9 +547,10 @@ Each line supports `{name}`, `{path}`, and (recent only) `{lastUsed}`, plus
 their `<...>` spellings. The name is expanded last, so markup inside a project
 name is used as written. A line that expands to nothing is dropped, and an
 entry with no lines left falls back to its path, so projects without a name
-still render as a single row. The cursor prefix goes on the first line and
-continuation lines are indented to match. `entryLines` takes priority over
-`entryFormat`.
+still render as a single row. `projectNameDisplay` can suppress the name in
+either list; a suppressed name expands to an empty string here too. The cursor
+prefix goes on the first line and continuation lines are indented to match.
+`entryLines` takes priority over `entryFormat`.
 
 Lists accept grid keys:
 

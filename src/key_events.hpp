@@ -13,4 +13,9 @@ bool eventMatchesKeySpec(const ftxui::Event& event, const std::string& spec);
 bool eventMatchesAny(const ftxui::Event& event,
                      const std::vector<std::string>& specs);
 
+// Shift+Enter as reported by terminals that disambiguate it (CSI-u, xterm
+// modifyOtherKeys) or by the Windows input patch in the vendored FTXUI.
+// Alt+Enter is accepted as the fallback used by many POSIX terminals.
+bool isShiftEnter(const ftxui::Event& event);
+
 }  // namespace claudex

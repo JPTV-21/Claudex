@@ -271,6 +271,41 @@ TEST_CASE("config/menuThemeFromDocument keeps defaults for missing optional keys
     CHECK_EQ(theme.variables.at("brand"), "#ff0000");
 }
 
+TEST_CASE("config/projectNameDisplay parses aliases and falls back") {
+    CHECK(projectNameDisplayFromText("both", ProjectNameDisplay::None) ==
+          ProjectNameDisplay::Both);
+    CHECK(projectNameDisplayFromText("All", ProjectNameDisplay::None) ==
+          ProjectNameDisplay::Both);
+    CHECK(projectNameDisplayFromText("pinned", ProjectNameDisplay::Both) ==
+          ProjectNameDisplay::Pinned);
+    CHECK(projectNameDisplayFromText("project-list",
+                                     ProjectNameDisplay::Both) ==
+          ProjectNameDisplay::Pinned);
+    CHECK(projectNameDisplayFromText("recent", ProjectNameDisplay::Both) ==
+          ProjectNameDisplay::Recent);
+    CHECK(projectNameDisplayFromText("hidden", ProjectNameDisplay::Both) ==
+          ProjectNameDisplay::None);
+    CHECK(projectNameDisplayFromText("nonsense",
+                                     ProjectNameDisplay::Pinned) ==
+          ProjectNameDisplay::Pinned);
+    CHECK_EQ(projectNameDisplayText(ProjectNameDisplay::Both), "both");
+    CHECK_EQ(projectNameDisplayText(ProjectNameDisplay::Pinned), "pinned");
+    CHECK_EQ(projectNameDisplayText(ProjectNameDisplay::Recent), "recent");
+    CHECK_EQ(projectNameDisplayText(ProjectNameDisplay::None), "none");
+}
+
+TEST_CASE("config/menuThemeFromDocument reads projectNameDisplay") {
+    json document = embeddedDefaultTheme();
+    document["projectNameDisplay"] = "Pinned";
+    CHECK(menuThemeFromDocument(document).projectNameDisplay ==
+          ProjectNameDisplay::Pinned);
+
+    document["projectNameDisplay"] = "invalid";
+    const MenuTheme defaults = menuThemeFromDocument(embeddedDefaultTheme());
+    CHECK(menuThemeFromDocument(document, &defaults).projectNameDisplay ==
+          defaults.projectNameDisplay);
+}
+
 TEST_CASE("config/menuThemeFromDocument clamps a negative recentLimit") {
     json document = embeddedDefaultTheme();
     document["recentLimit"] = -4;

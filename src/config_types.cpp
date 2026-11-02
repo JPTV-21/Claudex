@@ -21,6 +21,44 @@ std::string messageText(
     return text;
 }
 
+ProjectNameDisplay projectNameDisplayFromText(const std::string& text,
+                                              ProjectNameDisplay fallback) {
+    const std::string token = normalizeMenuToken(text);
+    if (token.empty()) {
+        return fallback;
+    }
+    if (token == "both" || token == "all" || token == "everywhere") {
+        return ProjectNameDisplay::Both;
+    }
+    if (token == "pinned" || token == "projects" || token == "project" ||
+        token == "projectlist" || token == "pinnedonly") {
+        return ProjectNameDisplay::Pinned;
+    }
+    if (token == "recent" || token == "recents" ||
+        token == "recentlist" || token == "recentonly") {
+        return ProjectNameDisplay::Recent;
+    }
+    if (token == "none" || token == "off" || token == "never" ||
+        token == "hidden" || token == "hide") {
+        return ProjectNameDisplay::None;
+    }
+    return fallback;
+}
+
+std::string projectNameDisplayText(ProjectNameDisplay display) {
+    switch (display) {
+        case ProjectNameDisplay::Both:
+            return "both";
+        case ProjectNameDisplay::Pinned:
+            return "pinned";
+        case ProjectNameDisplay::Recent:
+            return "recent";
+        case ProjectNameDisplay::None:
+            return "none";
+    }
+    return "both";
+}
+
 std::string jsonStringField(const json& object, const char* key,
                             const std::string& fallback) {
     if (object.is_object()) {

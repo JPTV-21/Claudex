@@ -102,4 +102,12 @@ bool eventMatchesAny(const Event& event,
     return false;
 }
 
+bool isShiftEnter(const Event& event) {
+    // Event compares raw input bytes, so these are the sequences FTXUI leaves
+    // untouched when it does not recognize them.
+    return event == Event::Special("\x1b[13;2u") ||      // CSI-u / kitty
+           event == Event::Special("\x1b[27;2;13~") ||   // xterm modifyOtherKeys
+           event == Event::Special("\x1b\r");            // Alt+Enter fallback
+}
+
 }  // namespace claudex

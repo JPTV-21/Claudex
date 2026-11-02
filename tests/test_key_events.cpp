@@ -58,6 +58,15 @@ TEST_CASE("keys/invalid specs never match") {
     CHECK_FALSE(eventMatchesKeySpec(Event::Return, "esc"));
 }
 
+TEST_CASE("keys/shift+enter sequences are recognized") {
+    CHECK(isShiftEnter(Event::Special("\x1b[13;2u")));
+    CHECK(isShiftEnter(Event::Special("\x1b[27;2;13~")));
+    CHECK(isShiftEnter(Event::Special("\x1b\r")));
+    CHECK_FALSE(isShiftEnter(Event::Return));
+    CHECK_FALSE(isShiftEnter(Event::Character("\r")));
+    CHECK_FALSE(isShiftEnter(Event::Special("\x1b[13;2~")));
+}
+
 TEST_CASE("keys/eventMatchesAny checks every spec") {
     const std::vector<std::string> quit = {"q", "esc"};
     CHECK(eventMatchesAny(Event::Character('q'), quit));
