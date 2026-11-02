@@ -5,15 +5,21 @@
 <h1 align="center">ClaudeX</h1>
 
 <p align="center">
-  A small, keyboard-first launcher for running **portable** Claude Code in the right
-  project folder with an isolated <code>CLAUDE_CONFIG_DIR</code>.
+  <strong>Portable</strong>, keyboard-first launcher for Claude Code — one
+  self-contained folder with an isolated <code>CLAUDE_CONFIG_DIR</code>.
 </p>
 
 <p align="center">
+  <img alt="Unofficial" src="https://img.shields.io/badge/unofficial-not%20affiliated%20with%20Anthropic-orange.svg">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
   <img alt="Platforms: Windows, macOS, Linux" src="https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux-2ea44f.svg">
   <img alt="Architectures: x64, arm64" src="https://img.shields.io/badge/arch-x64%20%7C%20arm64-555.svg">
 </p>
+
+> **Unofficial project.** ClaudeX is an independent, community-made launcher.
+> It is not affiliated with, endorsed by, or supported by Anthropic. “Claude”
+> and “Claude Code” are trademarks of Anthropic. ClaudeX does not bundle Claude
+> Code; you need your own installation and account to use it.
 
 ![ClaudeX main menu](docs/screenshots/main-menu.png)
 
