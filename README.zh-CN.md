@@ -1,12 +1,12 @@
 <p align="center">
-  <a href="README.md">English</a> | 简体中文
-</p>
-
-<p align="center">
   <img src="resources/claudex-icon.png" width="112" alt="ClaudeX 图标">
 </p>
 
 <h1 align="center">ClaudeX</h1>
+
+<p align="center">
+  <a href="README.md">English</a> | 简体中文
+</p>
 
 <p align="center">
   <strong>便携</strong>、键盘优先的 Claude Code 启动器——单个自包含文件夹，

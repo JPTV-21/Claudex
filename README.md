@@ -1,12 +1,12 @@
 <p align="center">
-  English | <a href="README.zh-CN.md">简体中文</a>
-</p>
-
-<p align="center">
   <img src="resources/claudex-icon.png" width="112" alt="ClaudeX icon">
 </p>
 
 <h1 align="center">ClaudeX</h1>
+
+<p align="center">
+  English | <a href="README.zh-CN.md">简体中文</a>
+</p>
 
 <p align="center">
   <strong>Portable</strong>, keyboard-first launcher for Claude Code — one
