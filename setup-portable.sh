@@ -75,6 +75,8 @@ CLAUDEX_ASSET_OVERRIDE=""
 PLATFORM_OVERRIDE=""
 ARCH_OVERRIDE=""
 INSTALL_DIR_OVERRIDE=""
+ALL_TARGETS=0
+BASE_ROOT=""
 ASSUME_YES=0
 INTERACTIVE=0
 DETECTED_OS=""
@@ -224,8 +226,9 @@ ClaudeX、data/ 和 bin/ 的根目录。
   -u, --update             强制重新下载最新版 ClaudeX 与 Claude Code
       --no-claudex         跳过 ClaudeX 的下载/更新
       --no-claude          跳过 Claude Code 的下载/更新
-      --platform OS        安装平台：windows/macos/linux（默认检测当前系统）
-      --arch ARCH          CPU 架构：x64/arm64（默认检测当前系统）
+      --platform OS        安装平台：windows/macos/linux/all（默认检测）
+      --arch ARCH          CPU 架构：x64/arm64（默认检测）
+      --all                下载全部 6 个平台/架构组合，每项一个子目录
       --install-dir DIR    安装目录（默认脚本所在目录）
   -y, --yes                使用默认值，不进行交互询问
       --claudex-repo REPO  指定 ClaudeX 仓库（owner/repo）
@@ -252,6 +255,7 @@ ClaudeX、data/ 和 bin/ 的根目录。
   bash setup-portable.sh --update
   bash setup-portable.sh --install-dir /opt/claudex --yes
   bash setup-portable.sh --platform macos --arch arm64
+  bash setup-portable.sh --all --install-dir /opt/claudex
   bash setup-portable.sh --claudex-repo owner/claudex
 EOF
 }
@@ -296,6 +300,9 @@ parse_args() {
                 ;;
             -y|--yes)
                 ASSUME_YES=1
+                ;;
+            --all)
+                ALL_TARGETS=1
                 ;;
             --platform)
                 [ "$#" -ge 2 ] || usage_error "--platform 需要一个平台名"
@@ -493,37 +500,46 @@ prompt_platform_arch() {
     fi
 
     [ -z "$PLATFORM_OVERRIDE" ] || OS=$PLATFORM_OVERRIDE
-    [ -z "$ARCH_OVERRIDE" ] || ARCH=$ARCH_OVERRIDE
+    if [ "$ALL_TARGETS" -eq 0 ]; then
+        [ -z "$ARCH_OVERRIDE" ] || ARCH=$ARCH_OVERRIDE
+    fi
 
     if [ "$INTERACTIVE" -eq 1 ]; then
-        printf '安装平台 [%s] (windows/macos/linux): ' "$OS"
+        printf '安装平台 [%s] (windows/macos/linux/all): ' "$OS"
         read answer || answer=""
         case "$answer" in
             "") ;;
-            windows|macos|linux) OS=$answer ;;
+            windows|macos|linux|all) OS=$answer ;;
             *) warn "无效平台：$answer，使用 $OS" ;;
         esac
 
-        printf 'CPU 架构 [%s] (x64/arm64): ' "$ARCH"
-        read answer || answer=""
-        case "$answer" in
-            "") ;;
-            x64|arm64) ARCH=$answer ;;
-            *) warn "无效架构：$answer，使用 $ARCH" ;;
-        esac
+        if [ "$OS" != "all" ]; then
+            printf 'CPU 架构 [%s] (x64/arm64): ' "$ARCH"
+            read answer || answer=""
+            case "$answer" in
+                "") ;;
+                x64|arm64) ARCH=$answer ;;
+                *) warn "无效架构：$answer，使用 $ARCH" ;;
+            esac
+        fi
     fi
 
     case "$OS" in
         windows|macos|linux) ;;
+        all) ALL_TARGETS=1 ;;
         *) die "不支持的平台：$OS" ;;
     esac
-    case "$ARCH" in
-        x64|arm64) ;;
-        *) die "不支持的架构：$ARCH" ;;
-    esac
 
-    if [ "$OS" != "$DETECTED_OS" ] || [ "$ARCH" != "$DETECTED_ARCH" ]; then
-        info "将下载 $OS/$ARCH 版本（不会在本机运行）。"
+    if [ "$ALL_TARGETS" -eq 1 ]; then
+        info "将下载全部 6 个平台/架构组合，每项一个子目录。"
+    else
+        case "$ARCH" in
+            x64|arm64) ;;
+            *) die "不支持的架构：$ARCH" ;;
+        esac
+        if [ "$OS" != "$DETECTED_OS" ] || [ "$ARCH" != "$DETECTED_ARCH" ]; then
+            info "将下载 $OS/$ARCH 版本（不会在本机运行）。"
+        fi
     fi
 }
 
@@ -1731,8 +1747,13 @@ print_summary() {
     say "    claudePath      = $CLAUDE_PATH_CONFIG"
 
     if [ -n "$LAUNCHER" ] && [ -f "$LAUNCHER" ]; then
-        say ""
-        say "启动方式：$(display_path "$LAUNCHER")"
+        if [ "$OS" = "$DETECTED_OS" ] && [ "$ARCH" = "$DETECTED_ARCH" ]; then
+            say ""
+            say "启动方式：$(display_path "$LAUNCHER")"
+        else
+            say ""
+            say "这是 $PLATFORM_LABEL $ARCH 版本，不能在本机运行。"
+        fi
     else
         say ""
         say "ClaudeX 就绪后，运行脚本目录中的 $CLAUDEX_EXE 即可。"
@@ -1755,15 +1776,9 @@ print_summary() {
 # 主流程
 # ---------------------------------------------------------------------------
 
-main() {
-    parse_args "$@"
-    detect_platform
-    prompt_platform_arch
-    prompt_install_dir
+install_current_target() {
     apply_platform_vars
     select_claude_asset_name
-    check_dependencies
-    setup_work
 
     print_banner
 
@@ -1784,12 +1799,15 @@ main() {
         info "跳过 Claude Code 下载/更新（--no-claude）"
     fi
 
-    if [ -n "$LAUNCHER" ] && [ -f "$LAUNCHER" ]; then
+    native=0
+    if [ "$OS" = "$DETECTED_OS" ] && [ "$ARCH" = "$DETECTED_ARCH" ]; then
+        native=1
+    fi
+
+    if [ "$native" -eq 1 ] && [ -n "$LAUNCHER" ] && [ -f "$LAUNCHER" ]; then
         if ! config_is_valid || ! config_is_complete; then
             run_launcher_once || true
         fi
-    else
-        info "没有找到 ClaudeX 可执行文件，跳过自动生成配置"
     fi
 
     if [ ! -f "$CONFIG_FILE" ] || ! config_is_valid; then
@@ -1827,8 +1845,57 @@ main() {
             HARD_FAIL=1
         fi
     fi
+}
 
-    print_summary
+print_multi_summary() {
+    target_exe() {
+        case "$1" in
+            windows) printf 'ClaudeX.exe' ;;
+            *) printf 'ClaudeX' ;;
+        esac
+    }
+
+    say ""
+    say "${BOLD}================ 完成 ================${RESET}"
+    say "  安装目录: $(display_path "$BASE_ROOT")"
+    say "  已安装目标:"
+    for target in windows-x64 windows-arm64 macos-x64 macos-arm64 linux-x64 linux-arm64; do
+        platform=${target%-*}
+        arch=${target#*-}
+        exe=$(target_exe "$platform")
+        label=$(printf '%-14s' "$platform/$arch")
+        if [ -f "$BASE_ROOT/$target/$exe" ]; then
+            say "    $label $(display_path "$BASE_ROOT/$target/$exe")"
+        else
+            say "    $label 未安装"
+        fi
+    done
+    say ""
+    say "  每个目标目录都包含自己的 $CONFIG_NAME、data/ 和 bin/。"
+}
+
+main() {
+    parse_args "$@"
+    detect_platform
+    prompt_platform_arch
+    prompt_install_dir
+    BASE_ROOT=$ROOT
+    check_dependencies
+    setup_work
+
+    if [ "$ALL_TARGETS" -eq 1 ]; then
+        for target in windows-x64 windows-arm64 macos-x64 macos-arm64 linux-x64 linux-arm64; do
+            OS=${target%-*}
+            ARCH=${target#*-}
+            ROOT="$BASE_ROOT/$target"
+            mkdir -p "$ROOT" || die "无法创建目录：$ROOT"
+            install_current_target
+        done
+        print_multi_summary
+    else
+        install_current_target
+        print_summary
+    fi
 
     if [ "$HARD_FAIL" -ne 0 ]; then
         exit 1

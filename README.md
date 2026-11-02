@@ -169,14 +169,27 @@ Both setup scripts ask before installing:
 
 - **Platform and architecture** — detected values are shown as defaults, so you
   can also download a build for another machine (`windows`, `macos`, `linux`;
-  `x64` or `arm64`).
+  `x64` or `arm64`), or enter `all` to fetch all six combinations.
 - **Install directory** — defaults to the script's folder. If the path does not
   exist, the script asks whether to create it.
 - **Download progress** — a live meter with transferred/total size and speed.
 
+With `all`, each target gets its own self-contained folder, so launchers never
+overwrite each other:
+
+```text
+ClaudeXAll/
+  windows-x64/      ClaudeX.exe, claudex-config.json, data/, bin/x64/windows/
+  windows-arm64/    ClaudeX.exe, claudex-config.json, data/, bin/arm64/windows/
+  macos-x64/        ClaudeX,     claudex-config.json, data/, bin/x64/macos/
+  macos-arm64/      ClaudeX,     claudex-config.json, data/, bin/arm64/macos/
+  linux-x64/        ClaudeX,     claudex-config.json, data/, bin/x64/linux/
+  linux-arm64/      ClaudeX,     claudex-config.json, data/, bin/arm64/linux/
+```
+
 For unattended runs, pass `-Yes` (PowerShell) or `--yes` (sh), plus
-`-InstallDir DIR` / `--install-dir DIR`, `-Platform` / `--platform`, and
-`-Architecture` / `--arch`.
+`-InstallDir DIR` / `--install-dir DIR`, `-Platform` / `--platform`,
+`-Architecture` / `--arch`, and `-All` / `--all`.
 
 Windows with Git for Windows: keep `setup-portable.bat` next to the script and
 run it from PowerShell, cmd, or by double-clicking:
@@ -187,9 +200,9 @@ run it from PowerShell, cmd, or by double-clicking:
 
 The `.bat` locates Git for Windows' `bash.exe` and runs the POSIX script.
 Common options: `-NoClaude`, `-NoClaudex`, `-Update`, `-Platform`,
-`-Architecture`, and `-InstallDir` (PowerShell); the sh script uses
-`--no-claude`, `--no-claudex`, `--update`, `--platform`, `--arch`, and
-`--install-dir`. Run with `-Help` / `--help` for the full list.
+`-Architecture`, `-InstallDir`, and `-All` (PowerShell); the sh script uses
+`--no-claude`, `--no-claudex`, `--update`, `--platform`, `--arch`,
+`--install-dir`, and `--all`. Run with `-Help` / `--help` for the full list.
 
 ## Portable configuration
 
