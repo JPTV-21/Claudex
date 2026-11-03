@@ -1,4 +1,5 @@
 #include "claude_finder.hpp"
+#include "config_bootstrap.hpp"
 #include "config_json.hpp"
 #include "config_manager.hpp"
 #include "grid_menu.hpp"
@@ -224,11 +225,11 @@ int main(int argc, char** argv) {
         return literal;
     };
 
-    fs::path configFile = executableDir / kDefaultConfigFile;
+    fs::path explicitConfigFile;
     bool whereClaude = false;
     if (auto environmentConfig = getEnvUtf8("CLAUDEX_CONFIG");
         environmentConfig && !environmentConfig->empty()) {
-        configFile = resolveConfigPath(*environmentConfig);
+        explicitConfigFile = resolveConfigPath(*environmentConfig);
     }
 
     for (int i = 1; i < argc; ++i) {
@@ -238,7 +239,7 @@ int main(int argc, char** argv) {
                 std::cerr << "Missing value after " << argument << ".\n";
                 return 2;
             }
-            configFile = resolveConfigPath(argv[++i]);
+            explicitConfigFile = resolveConfigPath(argv[++i]);
         } else if (argument == "--where-claude") {
             whereClaude = true;
         } else if (argument == "--help" || argument == "-h") {
@@ -277,6 +278,12 @@ int main(int argc, char** argv) {
         }
     }
 
+    fs::path configFile = explicitConfigFile.empty()
+                              ? executableDir / kDefaultConfigFile
+                              : explicitConfigFile;
+    const ConfigBootstrapResult bootstrap =
+        bootstrapConfigPath(executableDir, configFile, pathResolver);
+    configFile = bootstrap.configFile;
     if (configFile.is_relative()) {
         std::error_code ec;
         fs::path absolute = fs::absolute(configFile, ec);
@@ -297,6 +304,12 @@ int main(int argc, char** argv) {
         config.log("WARN", "config has " +
                                std::to_string(config.configIssues().size()) +
                                " key issue(s)");
+    }
+    if (!bootstrap.messageKey.empty()) {
+        const std::string text = messageText(
+            config.menuTheme, bootstrap.messageKey.c_str(),
+            {{"config", bootstrap.messageConfig}});
+        config.log("WARN", "bootstrap: " + text);
     }
 
     if (whereClaude) {
@@ -2202,9 +2215,11 @@ int main(int argc, char** argv) {
         return false;
     });
 
+    bool configJustCreated = false;
     if (config.fileWasMissing()) {
         std::string error;
         if (config.save(error)) {
+            configJustCreated = true;
             setStatus(
                 messageText(config.menuTheme, "configCreated",
                             {{"config", pathToUtf8(config.configFile())}}),
@@ -2233,6 +2248,16 @@ int main(int argc, char** argv) {
         }
     } else if (config.loadHadError()) {
         setStatus(config.loadWarning(), true);
+    }
+
+    if (!bootstrap.messageKey.empty() && !configJustCreated) {
+        const std::string text = messageText(
+            config.menuTheme, bootstrap.messageKey.c_str(),
+            {{"config", bootstrap.messageConfig}});
+        if (!statusMessage.empty()) {
+            statusMessage += " ";
+        }
+        statusMessage += text;
     }
 
     if (!config.themeStatus().empty()) {

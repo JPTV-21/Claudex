@@ -53,6 +53,8 @@ TEST_CASE("manager/defaults match the embedded resources") {
 
     const Settings defaults = settingsFromDefault(embeddedDefaultConfig());
     CHECK_EQ(config.settings.themeFile, defaults.themeFile);
+    CHECK_EQ(config.settings.configFile, defaults.configFile);
+    CHECK(defaults.configFile.empty());
     CHECK_EQ(config.settings.claudePath, defaults.claudePath);
     CHECK_EQ(config.settings.claudeExclude, defaults.claudeExclude);
     CHECK_EQ(config.settings.launchCommand.windows,
@@ -92,6 +94,56 @@ TEST_CASE("manager/save then load round-trips projects") {
     CHECK_EQ(reloaded.projects[0].path, "proj-a");
     CHECK_EQ(reloaded.projects[0].lastUsed, "2026-01-02T03:04:05");
     CHECK_EQ(reloaded.projects[1].path, "proj-b");
+}
+
+TEST_CASE("manager/configFile round-trips through save and load") {
+    TempDir root;
+    {
+        ConfigManager config(root.path(), configPath(root));
+        config.load();
+        CHECK(config.settings.configFile.empty());
+        config.settings.configFile = "moved/claudex-config.json";
+        std::string error;
+        REQUIRE(config.save(error));
+        CHECK(error.empty());
+    }
+
+    CHECK_EQ(readJson(configPath(root)).at("configFile").get<std::string>(),
+             "moved/claudex-config.json");
+
+    ConfigManager reloaded(root.path(), configPath(root));
+    reloaded.load();
+    CHECK_EQ(reloaded.settings.configFile, "moved/claudex-config.json");
+}
+
+TEST_CASE("manager/a missing configFile is repaired to empty") {
+    TempDir root;
+    json document = embeddedDefaultConfig();
+    document.erase("configFile");
+    writeFile(configPath(root), document.dump(2));
+
+    ConfigManager config(root.path(), configPath(root));
+    config.load();
+    CHECK_FALSE(config.configIssues().empty());
+    std::string error;
+    REQUIRE(config.repair(error));
+    CHECK_EQ(readJson(configPath(root)).at("configFile").get<std::string>(),
+             "");
+}
+
+TEST_CASE("manager/save creates a nested config file and its folder") {
+    TempDir root;
+    const fs::path nested =
+        root.path() / "deep" / "sub" / "claudex-config.json";
+    ConfigManager config(root.path(), nested);
+    config.load();
+    REQUIRE(config.fileWasMissing());
+
+    std::string error;
+    REQUIRE(config.save(error));
+    CHECK(error.empty());
+    CHECK(fs::exists(nested));
+    CHECK_EQ(readJson(nested).at("configFile").get<std::string>(), "");
 }
 
 TEST_CASE("manager/save writes through a temporary file") {

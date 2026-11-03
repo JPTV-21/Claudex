@@ -149,6 +149,7 @@ bool ConfigManager::save(std::string& error) {
         userDocument_.is_object() ? userDocument_ : defaultDocument_;
     document["version"] = defaultDocument_.at("version");
     document["theme"] = settings.themeFile;
+    document["configFile"] = settings.configFile;
     document["claudePath"] = settings.claudePath;
     document["claudeExclude"] = settings.claudeExclude;
     json launchCommand;
@@ -327,6 +328,12 @@ void ConfigManager::loadSettings(const json& document) {
         settings.themeFile =
             trim(value).empty() ? defaultSettings_.themeFile
                                 : std::move(value);
+    }
+    if (document.contains("configFile") &&
+        document["configFile"].is_string()) {
+        // Empty means "keep this file"; keep the value as written so a
+        // relative target stays relative.
+        settings.configFile = document["configFile"].get<std::string>();
     }
     if (document.contains("claudePath")) {
         const json& value = document["claudePath"];

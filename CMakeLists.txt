@@ -117,6 +117,7 @@ add_library(claudex_core STATIC
     src/path_resolver.cpp
     src/config_types.cpp
     src/config_json.cpp
+    src/config_bootstrap.cpp
     src/config_manager.cpp
     src/claude_finder.cpp
     src/launcher.cpp

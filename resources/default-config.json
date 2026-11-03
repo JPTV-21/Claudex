@@ -1,6 +1,7 @@
 {
   "version": 1,
   "theme": "claudex-theme.json",
+  "configFile": "",
   "claudePath": ["claude*"],
   "claudeExclude": ["ClaudeX*"],
   "launchCommand": {

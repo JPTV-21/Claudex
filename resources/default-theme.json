@@ -214,6 +214,7 @@
     "configCreated": "<success>Created {config}.</success>",
     "configRepaired": "<success>Config repaired automatically. Backup: {backup}</success>",
     "configRepairFailed": "<error>Automatic config repair failed: {error}</error>",
+    "configRedirectTargetMissing": "<warning>{config} does not exist; a new config will be created there.</warning>",
     "configSaveBeforeLaunchFailed": "<error>Config could not be saved: {error}</error>",
     "claudeExited": "<success>Claude exited.</success>",
     "claudeExitedWithCode": "<success>Claude exited with code {code}.</success>",

@@ -225,6 +225,7 @@ bool updateLaunchCommand(const json& value, LaunchCommand& command) {
 Settings settingsFromDefault(const json& document) {
     Settings settings;
     settings.themeFile = document.at("theme").get<std::string>();
+    settings.configFile = document.at("configFile").get<std::string>();
     // The embedded default uses an array, but a string is accepted too so the
     // default file stays easy to edit by hand.
     const json& claudePath = document.at("claudePath");

@@ -210,6 +210,15 @@ bin/
 占位符和环境变量。所有启动器设置（包括数据位置 `claudeConfigDir` 和
 `tempDir`）都是普通配置字段。
 
+配置文件也可以在配置里选择，方式和 `theme` 选择主题文件一样：自己把
+`claudex-config.json` 复制到新位置，再把启动时所用的配置里的 `configFile`
+设为该路径。启动器只按路径加载，不会自动复制、移动或删除任何文件；原文件
+保持不动（可以继续作为指向新文件的小引导）。占位符和环境变量会展开，相对的
+`configFile` 从启动器文件夹开始解析。目标不存在时，启动器会在那里创建一份
+新的默认配置。引导文件只读取 `configFile` 字段，其他字段会被忽略。
+`configFile` 只切换配置文件：主题、`data/`、`tmp/` 和日志仍从启动器文件夹
+解析。
+
 已有的 `data/launcher.json` 文件和旧的项目数组格式不会被读取或自动迁移。
 如果想把已有文件保留在其他位置，请显式设置配置路径。
 
@@ -230,9 +239,9 @@ bin/
 - 接受字符串形式的 `launchCommand` 作为两个平台的简写，并用默认对象补齐
   缺失或为空的 `windows`/`posix` 条目；
 - 用默认值替换为空的 `theme`、`claudePath`、`launchCommand`、
-  `claudeConfigDir` 和 `tempDir`，使保存的配置明确完整；空的 `logFile` 会
-  保留，因为它会禁用日志，空的 `claudeExclude: []` 也会保留，因为它表示
-  “不排除任何内容”；
+  `claudeConfigDir` 和 `tempDir`，使保存的配置明确完整；空的 `configFile`
+  会保留，因为它表示“不切换”，空的 `logFile` 会保留，因为它会禁用日志，
+  空的 `claudeExclude: []` 也会保留，因为它表示“不排除任何内容”；
 - 用默认值替换 JSON 类型错误的配置键；
 - 保留所有有效的用户值和其他额外的用户键；
 - 在修复配置之前写入 `claudex-config.json.before-fix` 备份。
@@ -255,6 +264,7 @@ bin/
 {
   "version": 1,
   "theme": "claudex-theme.json",
+  "configFile": "",
   "claudePath": ["claude*"],
   "claudeExclude": ["ClaudeX*"],
   "launchCommand": {
@@ -281,6 +291,7 @@ bin/
 | 字段 | 含义 |
 | --- | --- |
 | `theme` | 主题 JSON 路径。缺失或为空表示 `claudex-theme.json`。支持占位符和通配符。 |
+| `configFile` | 要加载的配置文件的可选路径（替代当前文件）。请自己把文件复制过去；启动器只按路径加载，和 `theme` 一样。缺失或为空表示保持当前文件。相对路径从启动器文件夹开始。 |
 | `claudePath` | 在哪里查找 Claude。可以是字符串或字符串数组。每个条目可以是文件、目录、通配符路径，或 `claude*` 这样的裸名称/模式。目录条目等价于 `<directory>/claude*`。为空或缺失时使用默认值 `["claude*"]`：先查启动器文件夹，再查 `PATH`。参见 [Claude 可执行文件检测](#claude-executable-detection)。 |
 | `claudeExclude` | 用户编写的 Claude 可执行文件检测排除项。可以是字符串或字符串数组。不含路径分隔符（`/`，Windows 上为 `\`）且不会展开为绝对路径的模式会匹配候选文件名（或主文件名）；否则匹配展开后的完整路径。支持 `*` 和 `?`；Windows 上不区分大小写。默认值为 `["ClaudeX*"]`；空数组表示不排除任何内容。 |
 | `launchCommand` | 用于启动 Claude 的 shell 命令。字符串会应用于所有平台；对象可以提供 `windows` 和 `posix` 变体。默认对象使用占位符设置 `CLAUDE_CONFIG_DIR`、`TEMP`、`TMP` 和 `TMPDIR`，然后运行 `{claude}`。占位符：`{claude}`、`{claudeConfigDir}`、`{tempDir}` 以及下面的路径标记。不含 `{claude}` 的命令会按原样运行并跳过检测。额外参数可以直接写在命令中，例如 `"{claude} --model sonnet"`。 |
@@ -1015,10 +1026,12 @@ Claude 与启动：
 ClaudeX [--config PATH] [--where-claude]
 ```
 
-也可以把 `CLAUDEX_CONFIG` 设置为备用配置文件。默认是可执行文件旁的
-`./claudex-config.json`；主题默认是旁边的 `./claudex-theme.json`。
-`--config` 的值和 `CLAUDEX_CONFIG` 都支持占位符、环境变量和通配符；相对
-配置路径从当前工作目录解析。`--where-claude` 会打印解析出的 Claude 可执行
+也可以把 `CLAUDEX_CONFIG` 设置为备用配置文件。选中的配置依次是
+`--config`、`CLAUDEX_CONFIG`，最后是默认的 `./claudex-config.json`；主题
+默认是旁边的 `./claudex-theme.json`。`--config` 的值和 `CLAUDEX_CONFIG`
+都支持占位符、环境变量和通配符；相对配置路径从当前工作目录解析。无论选中
+哪个文件，只要其中的 `configFile` 非空，就会像 `theme` 选择主题文件一样
+加载它指向的文件。`--where-claude` 会打印解析出的 Claude 可执行
 文件并退出，不启动界面，可用于检查 `claudePath` 和 `claudeExclude`；它会
 遵循排除模式。`--help` 会打印选项和默认键绑定。
 
@@ -1058,6 +1071,7 @@ src/                    launcher code, built as two static libraries
   path_resolver.*       {root}/{drive}/~ expansion, wildcards, launchCommand paths
   config_types.hpp      Settings, Project, MenuTheme, ScreenTheme, ...
   config_json.*         theme/config parsing, merging, default repair
+  config_bootstrap.*    config path selection through configFile
   config_manager.*      loading, startup repair, theme writing, logging
   claude_finder.*       Claude executable detection and claudeExclude
   launcher.*            portable folders, child processes, launch commands

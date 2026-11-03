@@ -28,6 +28,9 @@ struct LaunchCommand {
 
 struct Settings {
     std::string themeFile;
+    // Optional path of another config file to load instead of this one. An
+    // empty value keeps the launcher on the file it was started with.
+    std::string configFile;
     std::vector<std::string> claudePath;
     std::vector<std::string> claudeExclude;
     LaunchCommand launchCommand;

@@ -239,6 +239,18 @@ The config file location can be changed with `--config PATH` or
 launcher settings, including the data locations (`claudeConfigDir` and
 `tempDir`), are normal config fields.
 
+The config file can also be selected from the config itself, the same way
+`theme` selects the theme file: copy `claudex-config.json` to the new location
+yourself, then set `configFile` in the config you launch to that path. The
+launcher only follows the path; nothing is copied, moved, or deleted
+automatically, and the original file is left as it is (it can keep serving as
+the small bootstrap that points at the new file). Placeholders and environment
+variables are expanded, and a relative `configFile` starts at the launcher
+folder. If the target does not exist, the launcher creates a new default
+config there. Only the bootstrap's `configFile` field is read; its other
+fields are ignored. `configFile` switches only the config file: the theme,
+`data/`, `tmp/`, and the log still resolve from the launcher folder.
+
 Existing `data/launcher.json` files and the old project-array format are not
 read or migrated automatically. Set the config path explicitly if you want to
 keep an existing file at another location.
@@ -263,6 +275,7 @@ On every startup, before drawing the menu, the launcher:
   missing or blank `windows`/`posix` entries from the default object;
 - replaces empty `theme`, `claudePath`, `launchCommand`, `claudeConfigDir`, and
   `tempDir` values with the default values, so the saved config is explicit;
+  an empty `configFile` is kept because it means "keep the current file";
   an empty `logFile` is kept because it disables logging, and an empty
   `claudeExclude: []` is kept because it means "exclude nothing";
 - replaces config keys whose JSON type is wrong with the default value;
@@ -292,6 +305,7 @@ disable logging.
 {
   "version": 1,
   "theme": "claudex-theme.json",
+  "configFile": "",
   "claudePath": ["claude*"],
   "claudeExclude": ["ClaudeX*"],
   "launchCommand": {
@@ -319,6 +333,7 @@ be listed more than once.
 | Field | Meaning |
 | --- | --- |
 | `theme` | Theme JSON path. Missing or empty means `claudex-theme.json`. Supports placeholders and wildcards. |
+| `configFile` | Optional path of the config file to load instead of this one. Copy the file there yourself; the launcher only follows the path, like `theme`. Missing or empty keeps the current file. Relative paths start at the launcher folder. |
 | `claudePath` | Where to find Claude. A string or an array of strings. Each entry may be a file, a directory, a wildcard path, or a bare name/pattern such as `claude*`. A directory entry means `<directory>/claude*`. Empty or missing uses the default `["claude*"]`: the launcher folder, then `PATH`. See [Claude executable detection](#claude-executable-detection). |
 | `claudeExclude` | User-written exclusions for Claude executable detection. A string or an array of strings. A pattern without a path separator (`/`, or `\` on Windows) that does not expand to an absolute path matches the candidate file name (or stem); otherwise it matches the expanded full path. Supports `*` and `?`; Windows is case-insensitive. Defaults to `["ClaudeX*"]`; an empty array excludes nothing. |
 | `launchCommand` | Shell command used to start Claude. A string applies to every platform; an object may provide `windows` and `posix` variants. Defaults to an object that sets `CLAUDE_CONFIG_DIR`, `TEMP`, `TMP`, and `TMPDIR` from the placeholders and runs `{claude}`. Placeholders: `{claude}`, `{claudeConfigDir}`, `{tempDir}`, and the path tokens below. Commands without `{claude}` run as-is and skip detection. Extra arguments go directly in the command, for example `"{claude} --model sonnet"`. |
@@ -1106,11 +1121,14 @@ environment from the launcher.
 ClaudeX [--config PATH] [--where-claude]
 ```
 
-`CLAUDEX_CONFIG` can also be set to an alternate config file. The default is
-`./claudex-config.json` beside the executable; the theme defaults to
-`./claudex-theme.json` beside it. Both the `--config` value and
-`CLAUDEX_CONFIG` support placeholders, environment variables, and wildcards;
-a relative config path is resolved from the current working directory.
+`CLAUDEX_CONFIG` can also be set to an alternate config file. The selected
+config is `--config`, else `CLAUDEX_CONFIG`, else the default
+`./claudex-config.json`. The theme defaults to `./claudex-theme.json` beside
+the executable. Both the `--config` value and `CLAUDEX_CONFIG` support
+placeholders, environment variables, and wildcards; a relative config path is
+resolved from the current working directory. Whatever file is selected, a
+non-empty `configFile` field in it selects the file actually loaded, exactly
+like `theme` selects the theme file.
 `--where-claude` prints the resolved Claude executable and exits without
 starting the UI, which is useful for checking `claudePath` and
 `claudeExclude`; it honors exclusion patterns. `--help` prints the options and
@@ -1152,6 +1170,7 @@ src/                    launcher code, built as two static libraries
   path_resolver.*       {root}/{drive}/~ expansion, wildcards, launchCommand paths
   config_types.hpp      Settings, Project, MenuTheme, ScreenTheme, ...
   config_json.*         theme/config parsing, merging, default repair
+  config_bootstrap.*    config path selection through configFile
   config_manager.*      loading, startup repair, theme writing, logging
   claude_finder.*       Claude executable detection and claudeExclude
   launcher.*            portable folders, child processes, launch commands
