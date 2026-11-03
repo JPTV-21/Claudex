@@ -8,7 +8,7 @@ if(MSVC)
         "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()
 
-project(ClaudeX VERSION 1.1.1 LANGUAGES CXX)
+project(ClaudeX VERSION 1.2.0 LANGUAGES CXX)
 
 set(CLAUDEX_AUTHOR "Wind_Blood")
 
