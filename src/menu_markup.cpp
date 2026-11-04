@@ -540,6 +540,40 @@ Element renderMenuMarkup(const std::string& text,
     return renderSegments(parsed.segments);
 }
 
+Element renderThemeText(const MenuTheme& theme, const std::string& text,
+                        int maxWidth) {
+    return renderMenuMarkup(text, &theme.variables, maxWidth);
+}
+
+void applyThemePlaceholder(InputOption& options, const MenuTheme& theme,
+                           const std::string* placeholder) {
+    const auto* variables = &theme.variables;
+    options.transform = [variables, placeholder](InputState state) {
+        if (state.is_placeholder && placeholder != nullptr) {
+            Element element = renderMenuMarkup(*placeholder, variables);
+            // Match the decorations the input applies to its own placeholder
+            // so the cursor and clipping behave the same.
+            element = std::move(element) | focusCursorBarBlinking | xflex |
+                      frame | dim;
+            if (state.focused) {
+                element = std::move(element) | inverted;
+            } else if (state.hovered) {
+                element = std::move(element) | underlined;
+            }
+            return element;
+        }
+        if (state.is_placeholder) {
+            state.element |= dim;
+        }
+        if (state.focused) {
+            state.element |= inverted;
+        } else if (state.hovered) {
+            state.element |= underlined;
+        }
+        return state.element;
+    };
+}
+
 int menuMarkupDisplayWidth(const std::string& text,
                            const std::map<std::string, std::string>* variables) {
     int width = 0;
@@ -839,29 +873,120 @@ Element styleMenuEntry(
     return element;
 }
 
-std::vector<std::string> expandEntryLines(
+namespace {
+
+// The value a template token expands to, or nullptr when the token is not one
+// of ours and should stay literal.
+const std::string* entryTokenValue(
+    std::string_view token, const std::string& name, const std::string& path,
+    const std::string& lastUsed, bool hasVisibleName, const std::string& empty) {
+    if (token == "{path}" || token == "<path>") {
+        return &path;
+    }
+    if (token == "{lastUsed}" || token == "<lastUsed>") {
+        return &lastUsed;
+    }
+    if (token == "{name}" || token == "<name>") {
+        return &name;
+    }
+    if (token == "{nameOrPath}" || token == "<nameOrPath>") {
+        return hasVisibleName ? &name : &path;
+    }
+    if (token == "{pathIfNamed}" || token == "<pathIfNamed>") {
+        return hasVisibleName ? &path : &empty;
+    }
+    if (token == "{pathIfUnnamed}" || token == "<pathIfUnnamed>") {
+        return hasVisibleName ? &empty : &path;
+    }
+    return nullptr;
+}
+
+// One scan over the authored template. Tokens inserted for a substitution are
+// appended verbatim and never visited again, which keeps markup inside a
+// project name (or a path that happens to look like a token) literal.
+std::vector<std::string> expandEntryLinesImpl(
     const std::vector<std::string>& lines, const std::string& name,
     const std::string& path, const std::string& lastUsed,
-    const std::map<std::string, std::string>* variables) {
+    const std::map<std::string, std::string>* variables,
+    bool fallbackToPath) {
+    const bool hasVisibleName =
+        menuMarkupDisplayWidth(name, variables) > 0;
+    const std::string empty;
     std::vector<std::string> expanded;
     for (const std::string& line : lines) {
-        std::string text = line;
-        replaceAll(text, "<path>", path);
-        replaceAll(text, "{path}", path);
-        replaceAll(text, "<lastUsed>", lastUsed);
-        replaceAll(text, "{lastUsed}", lastUsed);
-        // Last, so the markup the name carries is not expanded again.
-        replaceAll(text, "<name>", name);
-        replaceAll(text, "{name}", name);
+        std::string text;
+        text.reserve(line.size());
+        std::size_t index = 0;
+        while (index < line.size()) {
+            if (line[index] == '{' || line[index] == '<') {
+                const char closer = line[index] == '{' ? '}' : '>';
+                const std::size_t end = line.find(closer, index + 1);
+                if (end != std::string::npos) {
+                    const std::string_view token(line.data() + index,
+                                                 end - index + 1);
+                    if (const std::string* value = entryTokenValue(
+                            token, name, path, lastUsed, hasVisibleName,
+                            empty)) {
+                        text.append(*value);
+                        index = end + 1;
+                        continue;
+                    }
+                }
+            }
+            text.push_back(line[index]);
+            ++index;
+        }
         if (menuMarkupDisplayWidth(text, variables) == 0) {
             continue;
         }
         expanded.push_back(std::move(text));
     }
-    if (expanded.empty() && !path.empty()) {
+    if (expanded.empty() && fallbackToPath && !path.empty()) {
         expanded.push_back(path);
     }
     return expanded;
+}
+
+}  // namespace
+
+std::vector<std::string> expandEntryLines(
+    const std::vector<std::string>& lines, const std::string& name,
+    const std::string& path, const std::string& lastUsed,
+    const std::map<std::string, std::string>* variables) {
+    return expandEntryLinesImpl(lines, name, path, lastUsed, variables, true);
+}
+
+std::vector<std::string> entryLinesFor(
+    const std::vector<std::string>& focusedLines,
+    const std::vector<std::string>& entryLines,
+    const std::string& entryFormat, bool focused, const std::string& name,
+    const std::string& path, const std::string& lastUsed,
+    const std::map<std::string, std::string>* variables) {
+    if (focused && !focusedLines.empty()) {
+        std::vector<std::string> lines = expandEntryLinesImpl(
+            focusedLines, name, path, lastUsed, variables, false);
+        if (!lines.empty()) {
+            return lines;
+        }
+    }
+    if (!entryLines.empty()) {
+        std::vector<std::string> lines = expandEntryLinesImpl(
+            entryLines, name, path, lastUsed, variables, false);
+        if (!lines.empty()) {
+            return lines;
+        }
+    } else {
+        const std::vector<std::string> fallback{entryFormat};
+        std::vector<std::string> lines = expandEntryLinesImpl(
+            fallback, name, path, lastUsed, variables, false);
+        if (!lines.empty()) {
+            return lines;
+        }
+    }
+    if (!path.empty()) {
+        return {path};
+    }
+    return {};
 }
 
 Element styleMenuEntryLines(

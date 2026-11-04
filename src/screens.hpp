@@ -47,6 +47,26 @@ int borderSpecWidth(const std::string& spec, const MenuTheme& theme);
 ftxui::Element alignElement(ftxui::Element element,
                             const std::string& alignment);
 
+// A horizontal viewport: |content| is panned so that the cell at |offset| is
+// kept in view. Offsets outside the content clamp to its ends. The caller
+// advances the offset over time to reveal a line that is wider than the space
+// it is given.
+ftxui::Element scrollHorizontally(ftxui::Element content, int offset);
+
+// Renders one line of theme markup in |width| columns. The line is centered
+// while it fits; a wider line is panned to |offset|, which makes the same
+// text usable as a marquee. Use menuMarkupDisplayWidth() to find the largest
+// useful offset.
+ftxui::Element renderScrollingText(const MenuTheme& theme,
+                                   const std::string& text, int width,
+                                   int offset);
+
+// The theme's fallback page for a terminal too small to draw the real
+// screens. When even the hint does not fit, the caller pans it with
+// |offset|. Returns an empty element when there is no room at all.
+ftxui::Element renderTinyHint(const MenuTheme& theme, int width, int height,
+                              int offset);
+
 std::map<std::string, std::string> blockPlaceholders(
     const BlockRenderContext& context);
 std::string expandBlockText(const std::string& text,

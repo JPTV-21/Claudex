@@ -12,5 +12,6 @@
   "tempDir": "data/tmp",
   "logFile": "claudex.log",
   "tabOnlySectionSwitch": false,
+  "defaultProjectName": "",
   "projects": []
 }

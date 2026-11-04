@@ -255,6 +255,8 @@ Settings settingsFromDefault(const json& document) {
     settings.logFile = document.at("logFile").get<std::string>();
     settings.tabOnlySectionSwitch =
         document.at("tabOnlySectionSwitch").get<bool>();
+    settings.defaultProjectName =
+        document.at("defaultProjectName").get<std::string>();
     return settings;
 }
 
@@ -402,6 +404,23 @@ MenuTheme menuThemeFromDocument(const json& document,
     theme.quickInputPlaceholder = jsonStringField(
         document, "quickInputPlaceholder",
         defaults ? defaults->quickInputPlaceholder : std::string());
+    theme.tinyHintEnabled = jsonBoolField(
+        document, "tinyHintEnabled",
+        defaults ? defaults->tinyHintEnabled : theme.tinyHintEnabled);
+    theme.tinyHintText = jsonStringField(
+        document, "tinyHintText",
+        defaults ? defaults->tinyHintText : theme.tinyHintText);
+    theme.tinyHintMinWidth = std::max(
+        0, jsonIntFieldResolved(
+               document, "tinyHintMinWidth",
+               defaults ? defaults->tinyHintMinWidth : theme.tinyHintMinWidth,
+               &theme.variables));
+    theme.tinyHintMinHeight = std::max(
+        0, jsonIntFieldResolved(
+               document, "tinyHintMinHeight",
+               defaults ? defaults->tinyHintMinHeight
+                        : theme.tinyHintMinHeight,
+               &theme.variables));
     theme.pathContinueLabel = jsonStringField(
         document, "pathContinueLabel",
         defaults ? defaults->pathContinueLabel : std::string());

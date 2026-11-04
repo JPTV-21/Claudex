@@ -9,6 +9,7 @@
 #include "path_resolver.hpp"
 #include "platform.hpp"
 #include "screens.hpp"
+#include "scroll_bar.hpp"
 #include "text_util.hpp"
 
 #include <ftxui/component/component.hpp>
@@ -17,6 +18,7 @@
 #include <ftxui/component/screen_interactive.hpp>
 #include <ftxui/dom/elements.hpp>
 #include <ftxui/dom/node.hpp>
+#include <ftxui/screen/terminal.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -164,8 +166,8 @@ struct DialogButtonBar {
             if (i != 0) {
                 row.push_back(text("   "));
             }
-            Element button = renderMenuMarkup(
-                labels[static_cast<std::size_t>(i)], &theme.variables);
+            Element button =
+                renderThemeText(theme, labels[static_cast<std::size_t>(i)]);
             if (i == hovered) {
                 button = button | inverted;
             }
@@ -480,6 +482,8 @@ int main(int argc, char** argv) {
                                  &config.menuTheme.variables) : 10;
     const bool listScroll =
         mainListBlock ? jsonBoolField(*mainListBlock, "scroll", true) : true;
+    const ScrollbarStyle listScrollbar =
+        parseScrollbarStyle(mainListBlock, &config.menuTheme.variables);
     const bool listFrame =
         mainListBlock ? jsonBoolField(*mainListBlock, "frame", true) : true;
 
@@ -506,10 +510,20 @@ int main(int argc, char** argv) {
         recentListBlock != nullptr
             ? stringListField(*recentListBlock, "entryLines", {})
             : std::vector<std::string>{};
+    // Optional extra line sets for the row that currently has keyboard focus.
+    // They fall back to entryLines when absent; see entryLinesFor.
+    const std::vector<std::string> projectFocusedEntryLines =
+        mainListBlock != nullptr
+            ? stringListField(*mainListBlock, "focusedEntryLines", {})
+            : std::vector<std::string>{};
+    const std::vector<std::string> recentFocusedEntryLines =
+        recentListBlock != nullptr
+            ? stringListField(*recentListBlock, "focusedEntryLines", {})
+            : std::vector<std::string>{};
 
     // projectNameDisplay controls where the optional name line appears.
-    // Passing an empty name makes expandEntryLines drop a line that consists
-    // only of {name}, as it already does for unnamed projects.
+    // Passing an empty name makes the name placeholders expand as unnamed,
+    // just like a project that has no name of its own.
     const ProjectNameDisplay nameDisplay =
         config.menuTheme.projectNameDisplay;
     const bool pinnedNamesShown = nameDisplay == ProjectNameDisplay::Both ||
@@ -517,36 +531,31 @@ int main(int argc, char** argv) {
     const bool recentNamesShown = nameDisplay == ProjectNameDisplay::Both ||
                                   nameDisplay == ProjectNameDisplay::Recent;
 
-    auto projectLinesFor = [&](int index,
-                               const std::string& raw) -> std::vector<std::string> {
+    auto projectLinesFor = [&](int index, const std::string& raw,
+                               bool focusedRow) -> std::vector<std::string> {
         if (index < 0 || index >= static_cast<int>(config.projects.size())) {
             return {raw};
         }
         const Project& project =
             config.projects[static_cast<std::size_t>(index)];
-        const std::vector<std::string>& lines =
-            projectEntryLines.empty() ? std::vector<std::string>{listEntryFormat}
-                                      : projectEntryLines;
-        return expandEntryLines(lines,
-                                pinnedNamesShown ? project.name : std::string(),
-                                project.path, project.lastUsed,
-                                &config.menuTheme.variables);
+        return entryLinesFor(
+            projectFocusedEntryLines, projectEntryLines, listEntryFormat,
+            focusedRow, pinnedNamesShown ? project.name : std::string(),
+            project.path, project.lastUsed, &config.menuTheme.variables);
     };
 
-    auto recentLinesFor = [&](int index) -> std::vector<std::string> {
+    auto recentLinesFor =
+        [&](int index, bool focusedRow) -> std::vector<std::string> {
         if (index < 0 ||
             index >= static_cast<int>(recentProjectIndices.size())) {
             return {};
         }
         const Project& project = config.projects[static_cast<std::size_t>(
             recentProjectIndices[static_cast<std::size_t>(index)])];
-        const std::vector<std::string>& lines =
-            recentEntryLines.empty() ? std::vector<std::string>{recentEntryFormat}
-                                     : recentEntryLines;
-        return expandEntryLines(lines,
-                                recentNamesShown ? project.name : std::string(),
-                                project.path, project.lastUsed,
-                                &config.menuTheme.variables);
+        return entryLinesFor(
+            recentFocusedEntryLines, recentEntryLines, recentEntryFormat,
+            focusedRow, recentNamesShown ? project.name : std::string(),
+            project.path, project.lastUsed, &config.menuTheme.variables);
     };
 
     const std::string recentActivePrefix =
@@ -566,9 +575,16 @@ int main(int argc, char** argv) {
     const int recentHeight =
         recentListBlock ? jsonIntFieldResolved(*recentListBlock, "height", 0,
                                   &config.menuTheme.variables) : 0;
+    // Scrolling is theme-controlled: the block's "scroll" and "frame" keys
+    // decide it, and the shipped default theme enables them for every list.
+    // When enabled, visibility follows the rendered lines (a two-line entry
+    // takes two rows), so an overflowing list gets a scrollbar instead of
+    // being clipped.
     const bool recentScroll =
         recentListBlock ? jsonBoolField(*recentListBlock, "scroll", false)
                         : false;
+    const ScrollbarStyle recentScrollbar =
+        parseScrollbarStyle(recentListBlock, &config.menuTheme.variables);
     const bool recentFrame =
         recentListBlock ? jsonBoolField(*recentListBlock, "frame", false)
                         : false;
@@ -581,6 +597,8 @@ int main(int argc, char** argv) {
     const bool actionScroll =
         actionListBlock ? jsonBoolField(*actionListBlock, "scroll", false)
                         : false;
+    const ScrollbarStyle actionScrollbar =
+        parseScrollbarStyle(actionListBlock, &config.menuTheme.variables);
     const bool actionFrame =
         actionListBlock ? jsonBoolField(*actionListBlock, "frame", false)
                         : false;
@@ -802,9 +820,11 @@ int main(int argc, char** argv) {
         pathMode = PathMode::Add;
         pathEditIndex = -1;
         pathInput.clear();
-        projectName.clear();
+        // Prefill the optional name field from the config. The value follows
+        // the same trim rule as a name typed by hand.
+        projectName = trim(config.settings.defaultProjectName);
         pathCursor = 0;
-        nameCursor = 0;
+        nameCursor = static_cast<int>(projectName.size());
         pathFocus = std::max(0, pathFieldIndex(PathField::Path));
         pathError.clear();
         pendingPath.clear();
@@ -1157,10 +1177,13 @@ int main(int argc, char** argv) {
 
     MenuOption menuOptions = MenuOption::Vertical();
     menuOptions.entries_option.transform = [&](const EntryState& state) {
+        const bool focusedRow =
+            state.active && focusIs(kMainFocusProjects);
         Element element = styleMenuEntryLines(
-            state, projectLinesFor(state.index, state.label), true,
-            focusIs(kMainFocusProjects), listActivePrefix, listInactivePrefix,
-            listInverseHighlight, &config.menuTheme.variables);
+            state, projectLinesFor(state.index, state.label, focusedRow),
+            true, focusIs(kMainFocusProjects), listActivePrefix,
+            listInactivePrefix, listInverseHighlight,
+            &config.menuTheme.variables);
         if (state.index >= 0 &&
             state.index < static_cast<int>(projectRowBoxes.size())) {
             element |= reflect(
@@ -1192,8 +1215,12 @@ int main(int argc, char** argv) {
             mainListBlock, projectGridColumns, projectGridAuto,
             listActivePrefix, listInactivePrefix, listInverseHighlight);
         options.format_lines = [&](int index, const std::string& label) {
-            return projectLinesFor(index, label);
+            return projectLinesFor(index, label, false);
         };
+        options.focused_format_lines =
+            [&](int index, const std::string& label) {
+                return projectLinesFor(index, label, true);
+            };
         options.on_change = clearProjectStatus;
         options.on_enter = [&](int index) {
             mainSelected = index;
@@ -1216,8 +1243,9 @@ int main(int argc, char** argv) {
 
     MenuOption recentMenuOptions = MenuOption::Vertical();
     recentMenuOptions.entries_option.transform = [&](const EntryState& state) {
+        const bool focusedRow = state.active && focusIs(kMainFocusRecent);
         Element element = styleMenuEntryLines(
-            state, recentLinesFor(state.index), true,
+            state, recentLinesFor(state.index, focusedRow), true,
             focusIs(kMainFocusRecent), recentActivePrefix,
             recentInactivePrefix, recentInverseHighlight,
             &config.menuTheme.variables);
@@ -1253,8 +1281,12 @@ int main(int argc, char** argv) {
             recentListBlockForGrid, recentGridColumns, recentGridAuto,
             recentActivePrefix, recentInactivePrefix, recentInverseHighlight);
         options.format_lines = [&](int index, const std::string&) {
-            return recentLinesFor(index);
+            return recentLinesFor(index, false);
         };
+        options.focused_format_lines =
+            [&](int index, const std::string&) {
+                return recentLinesFor(index, true);
+            };
         options.on_change = clearProjectStatus;
         options.on_enter = [&](int index) {
             if (index >= 0 &&
@@ -1323,12 +1355,16 @@ int main(int argc, char** argv) {
     InputOption pathInputOptions;
     pathInputOptions.multiline = false;
     pathInputOptions.cursor_position = &pathCursor;
+    applyThemePlaceholder(pathInputOptions, config.menuTheme,
+                          &pathInputPlaceholder);
     auto pathInputComponent =
         Input(&pathInput, &pathInputPlaceholder, pathInputOptions);
 
     InputOption nameInputOptions;
     nameInputOptions.multiline = false;
     nameInputOptions.cursor_position = &nameCursor;
+    applyThemePlaceholder(nameInputOptions, config.menuTheme,
+                          &projectNamePlaceholder);
     auto nameInputComponent =
         Input(&projectName, &projectNamePlaceholder, nameInputOptions);
 
@@ -1348,6 +1384,8 @@ int main(int argc, char** argv) {
     quickInputOptions.multiline = false;
     quickInputOptions.cursor_position = &quickInputCursor;
     quickInputOptions.on_enter = submitQuickLaunch;
+    applyThemePlaceholder(quickInputOptions, config.menuTheme,
+                          &quickInputPlaceholder);
     auto quickInputComponent =
         Input(&quickInput, &quickInputPlaceholder, quickInputOptions);
 
@@ -1401,7 +1439,7 @@ int main(int argc, char** argv) {
 
         Element list = projectListComponent->Render();
         if (listScroll) {
-            list = list | vscroll_indicator;
+            list = addScrollbar(std::move(list), listScrollbar);
         }
         if (listFrame) {
             list = list | frame;
@@ -1416,7 +1454,7 @@ int main(int argc, char** argv) {
         if (!recentMenuEntries.empty()) {
             Element recent = recentListComponent->Render();
             if (recentScroll) {
-                recent = recent | vscroll_indicator;
+                recent = addScrollbar(std::move(recent), recentScrollbar);
             }
             if (recentFrame) {
                 recent = recent | frame;
@@ -1504,7 +1542,7 @@ int main(int argc, char** argv) {
         Element actions = actionGrid ? actionGrid->Render()
                                        : projectActionsMenu->Render();
         if (actionScroll) {
-            actions = actions | vscroll_indicator;
+            actions = addScrollbar(std::move(actions), actionScrollbar);
         }
         if (actionFrame) {
             actions = actions | frame;
@@ -2276,8 +2314,59 @@ int main(int argc, char** argv) {
 
     clearScreen();
 
+    // A terminal too small for any page shows one themeable reminder instead of
+    // a half-drawn UI. When the reminder itself is wider than the terminal it
+    // is panned across the screen so every character can still be read.
+    int tinyHintOffset = 0;
+    auto tinyHintLastStep = std::chrono::steady_clock::now();
+    auto isTinyTerminal = [&](const Dimensions& terminal) {
+        const MenuTheme& theme = config.menuTheme;
+        if (!theme.tinyHintEnabled || theme.tinyHintText.empty()) {
+            return false;
+        }
+        return (theme.tinyHintMinWidth > 0 &&
+                terminal.dimx < theme.tinyHintMinWidth) ||
+               (theme.tinyHintMinHeight > 0 &&
+                terminal.dimy < theme.tinyHintMinHeight);
+    };
+
+    auto pageView = Renderer(root, [&] {
+        const Dimensions terminal = Terminal::Size();
+        if (!isTinyTerminal(terminal)) {
+            tinyHintOffset = 0;
+            return root->Render();
+        }
+        const int textWidth = menuMarkupDisplayWidth(
+            config.menuTheme.tinyHintText, &config.menuTheme.variables);
+        if (textWidth > terminal.dimx) {
+            const auto now = std::chrono::steady_clock::now();
+            if (now - tinyHintLastStep >= std::chrono::milliseconds(250)) {
+                tinyHintLastStep = now;
+                tinyHintOffset = (tinyHintOffset + 1) % textWidth;
+            }
+            // Keep frames coming until the whole line has scrolled past.
+            screen.RequestAnimationFrame();
+        } else {
+            tinyHintOffset = 0;
+        }
+        return renderTinyHint(config.menuTheme, terminal.dimx, terminal.dimy,
+                              tinyHintOffset);
+    });
+
+    auto gatedRoot = CatchEvent(pageView, [&](Event event) {
+        // The reminder hides the page, so input must not reach invisible
+        // controls. The quit key still leaves the launcher.
+        if (isTinyTerminal(Terminal::Size())) {
+            if (eventMatchesAny(event, config.menuTheme.keys.quit)) {
+                screen.Exit();
+            }
+            return true;
+        }
+        return false;
+    });
+
     while (true) {
-        screen.Loop(root);
+        screen.Loop(gatedRoot);
         if (!launchRequested) {
             break;
         }

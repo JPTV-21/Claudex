@@ -6,6 +6,8 @@
 #include "render_helper.hpp"
 #include "text_util.hpp"
 
+#include <ftxui/component/component.hpp>
+
 using namespace claudex;
 using ftxui::Color;
 using testfw::renderPlain;
@@ -172,6 +174,49 @@ TEST_CASE("markup/renderMenuMarkup uses theme color names") {
     // Without the theme the same tag is just text.
     CHECK_EQ(renderPlain(markup("<brand>x</brand>")),
              "<brand>x</brand>");
+}
+
+TEST_CASE("markup/renderThemeText applies tags through the theme") {
+    MenuTheme theme;
+    theme.variables = testfw::defaultPalette();
+    theme.variables["brand"] = "#ff0000";
+
+    ftxui::Element element =
+        renderThemeText(theme, "<brand>ab</brand> <bold>cd</bold>");
+    ftxui::Screen screen = ftxui::Screen::Create(
+        ftxui::Dimension::Fixed(5), ftxui::Dimension::Fixed(1));
+    ftxui::Render(screen, element);
+    CHECK_EQ(testfw::stripAnsi(screen.ToString()), "ab cd");
+    CHECK(screen.PixelAt(0, 0).foreground_color == Color(255, 0, 0));
+    CHECK(screen.PixelAt(1, 0).foreground_color == Color(255, 0, 0));
+    CHECK(screen.PixelAt(3, 0).bold);
+}
+
+TEST_CASE("markup/input placeholders render markup and keep typed text") {
+    MenuTheme theme;
+    theme.variables = testfw::defaultPalette();
+    theme.variables["brand"] = "#ff0000";
+    std::string placeholder = "<brand>type here</brand>";
+    std::string content;
+
+    ftxui::InputOption options;
+    applyThemePlaceholder(options, theme, &placeholder);
+    ftxui::Component input =
+        ftxui::Input(&content, &placeholder, options);
+
+    ftxui::Screen empty = ftxui::Screen::Create(
+        ftxui::Dimension::Fixed(9), ftxui::Dimension::Fixed(1));
+    ftxui::Render(empty, input->Render());
+    CHECK_EQ(testfw::stripAnsi(empty.ToString()), "type here");
+    CHECK(empty.PixelAt(0, 0).foreground_color == Color(255, 0, 0));
+
+    // Typed content is literal: angle brackets in a path stay visible.
+    content = "<brand>typed</brand>";
+    ftxui::Screen typed = ftxui::Screen::Create(
+        ftxui::Dimension::Fixed(22), ftxui::Dimension::Fixed(1));
+    ftxui::Render(typed, input->Render());
+    CHECK(contains(testfw::stripAnsi(typed.ToString()),
+                   "<brand>typed</brand>"));
 }
 
 // --- truncation ----------------------------------------------------------------
@@ -433,6 +478,93 @@ TEST_CASE("markup/a name's own markup is not expanded again") {
     const auto lines = expandEntryLines({"{name}"}, "{path}", "/p", "", nullptr);
     REQUIRE(lines.size() == 1);
     CHECK_EQ(lines[0], "{path}");
+}
+
+TEST_CASE("markup/expandEntryLines nameOrPath uses a visible name") {
+    const auto& palette = testfw::defaultPalette();
+    CHECK_EQ(expandEntryLines({"{nameOrPath}"}, "My <red>project</red>",
+                              "/p", "", &palette),
+             std::vector<std::string>{"My <red>project</red>"});
+    CHECK_EQ(expandEntryLines({"<nameOrPath>"}, "", "/p", "", &palette),
+             std::vector<std::string>{"/p"});
+    // Markup without any visible text counts as no name.
+    CHECK_EQ(expandEntryLines({"{nameOrPath}"}, "<red></red>", "/p", "",
+                              &palette),
+             std::vector<std::string>{"/p"});
+}
+
+TEST_CASE("markup/expandEntryLines pathIfNamed and pathIfUnnamed") {
+    const auto& palette = testfw::defaultPalette();
+    CHECK_EQ(expandEntryLines({"{pathIfNamed}"}, "N", "/p", "", &palette),
+             std::vector<std::string>{"/p"});
+    CHECK_EQ(expandEntryLines({"<pathIfNamed>"}, "N", "/p", "", &palette),
+             std::vector<std::string>{"/p"});
+    CHECK_EQ(expandEntryLines({"{pathIfUnnamed}", "{name}"}, "N", "/p", "",
+                              &palette),
+             std::vector<std::string>{"N"});
+    CHECK_EQ(expandEntryLines({"{name}", "{pathIfUnnamed}"}, "", "/p", "",
+                              &palette),
+             std::vector<std::string>{"/p"});
+    // A line that only held the empty branch disappears; the entry then takes
+    // the usual bare-path fallback.
+    CHECK_EQ(expandEntryLines({"<muted>{pathIfNamed}</muted>"}, "", "/p", "",
+                              &palette),
+             std::vector<std::string>{"/p"});
+}
+
+TEST_CASE("markup/expandEntryLines never re-expands substituted values") {
+    const auto& palette = testfw::defaultPalette();
+    CHECK_EQ(expandEntryLines({"{nameOrPath}"}, "{path}", "/p", "", &palette),
+             std::vector<std::string>{"{path}"});
+    CHECK_EQ(expandEntryLines({"{nameOrPath}"}, "<path>", "/p", "", &palette),
+             std::vector<std::string>{"<path>"});
+    // A path that looks like a token stays literal too.
+    CHECK_EQ(expandEntryLines({"{path}"}, "N", "{name}", "", &palette),
+             std::vector<std::string>{"{name}"});
+}
+
+TEST_CASE("markup/entryLinesFor selects focus and base templates") {
+    const auto& palette = testfw::defaultPalette();
+    const std::vector<std::string> base{"{nameOrPath}"};
+    const std::vector<std::string> focused{"{name}", "<muted>{path}</muted>"};
+    CHECK_EQ(entryLinesFor(focused, base, "", true, "N", "/p", "", &palette),
+             (std::vector<std::string>{"N", "<muted>/p</muted>"}));
+    CHECK_EQ(entryLinesFor(focused, base, "", false, "N", "/p", "", &palette),
+             std::vector<std::string>{"N"});
+    CHECK_EQ(entryLinesFor({}, base, "", true, "N", "/p", "", &palette),
+             std::vector<std::string>{"N"});
+}
+
+TEST_CASE("markup/entryLinesFor falls back when the focused template is empty") {
+    const auto& palette = testfw::defaultPalette();
+    const std::vector<std::string> base{"<muted>{path}</muted>"};
+    const std::vector<std::string> focused{"{pathIfNamed}"};
+    CHECK_EQ(entryLinesFor(focused, base, "", true, "", "/p", "", &palette),
+             (std::vector<std::string>{"<muted>/p</muted>"}));
+}
+
+TEST_CASE("markup/entryLinesFor keeps entryLines before entryFormat") {
+    const auto& palette = testfw::defaultPalette();
+    CHECK_EQ(entryLinesFor({}, {"{name}"}, "<path>", false, "N", "/p", "",
+                           &palette),
+             std::vector<std::string>{"N"});
+    CHECK_EQ(entryLinesFor({}, {}, "<path>", false, "N", "/p", "", &palette),
+             std::vector<std::string>{"/p"});
+    // An explicit entryLines list that renders empty falls back to the bare
+    // path rather than switching to entryFormat.
+    CHECK_EQ(entryLinesFor({}, {"{name}"}, "<muted>{path}</muted>", false, "",
+                           "/p", "", &palette),
+             std::vector<std::string>{"/p"});
+}
+
+TEST_CASE("markup/entryLinesFor treats a suppressed name as unnamed") {
+    const auto& palette = testfw::defaultPalette();
+    CHECK_EQ(entryLinesFor({}, {"{nameOrPath}"}, "", false, "", "/p", "",
+                           &palette),
+             std::vector<std::string>{"/p"});
+    CHECK_EQ(entryLinesFor({}, {"{pathIfUnnamed}"}, "", false, "", "/p", "",
+                           &palette),
+             std::vector<std::string>{"/p"});
 }
 
 TEST_CASE("markup/styleMenuEntryLines indents continuation lines") {

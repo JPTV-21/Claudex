@@ -218,6 +218,97 @@ TEST_CASE("grid/format_lines renders multi-line cells") {
     CHECK_EQ(row1.find("bb"), row2.find("path-bb"));
 }
 
+TEST_CASE("grid/focused_format_lines applies to the selected cell") {
+    std::vector<std::string> entries = {"a", "b"};
+    int selected = 1;
+    GridMenuOptions options = gridOptions(2);
+    options.activePrefix = "";
+    options.inactivePrefix = "";
+    options.columnGap = 1;
+    options.format_lines = [](int, const std::string& entry) {
+        return std::vector<std::string>{entry};
+    };
+    options.focused_format_lines = [](int, const std::string& entry) {
+        return std::vector<std::string>{entry + "!"};
+    };
+    const auto menu = GridMenu(&entries, &selected, options);
+
+    const std::string out = renderPlain(menu->Render());
+    CHECK(out.find("a ") != std::string::npos);
+    CHECK(out.find("b!") != std::string::npos);
+
+    selected = 0;
+    const std::string moved = renderPlain(menu->Render());
+    CHECK(moved.find("a!") != std::string::npos);
+}
+
+TEST_CASE("grid/focused_format_lines falls back when empty") {
+    std::vector<std::string> entries = {"a", "b"};
+    int selected = 0;
+    GridMenuOptions options = gridOptions(2);
+    options.activePrefix = "";
+    options.inactivePrefix = "";
+    options.columnGap = 1;
+    options.format_lines = [](int, const std::string& entry) {
+        return std::vector<std::string>{entry};
+    };
+    options.focused_format_lines = [](int, const std::string&) {
+        return std::vector<std::string>{};
+    };
+    const auto menu = GridMenu(&entries, &selected, options);
+    CHECK_EQ(renderPlain(menu->Render()), "a b");
+}
+
+TEST_CASE("grid/focused variant width participates in the column layout") {
+    std::vector<std::string> entries = {"aa", "bb"};
+    int selected = 0;
+    GridMenuOptions options = gridOptions(2);
+    options.activePrefix = "";
+    options.inactivePrefix = "";
+    options.columnGap = 1;
+    options.format_lines = [](int, const std::string& entry) {
+        return std::vector<std::string>{entry};
+    };
+    options.focused_format_lines = [](int index, const std::string& entry) {
+        return std::vector<std::string>{
+            index == 1 ? std::string("focus-long") : entry};
+    };
+    const auto menu = GridMenu(&entries, &selected, options);
+
+    // The unselected second cell's focused variant is the widest line, so the
+    // second column starts after it even though that variant is not drawn.
+    const std::string out = renderPlain(menu->Render());
+    CHECK_EQ(out.find("bb"), static_cast<std::size_t>(11));
+}
+
+TEST_CASE("grid/focused_format_lines follows component focus") {
+    std::vector<std::string> entries = {"a"};
+    int selected = 0;
+    GridMenuOptions options = gridOptions(1);
+    options.activePrefix = "";
+    options.inactivePrefix = "";
+    options.format_lines = [](int, const std::string& entry) {
+        return std::vector<std::string>{entry};
+    };
+    options.focused_format_lines = [](int, const std::string& entry) {
+        return std::vector<std::string>{entry + "!"};
+    };
+    const auto menu = GridMenu(&entries, &selected, options);
+
+    std::string siblingValue;
+    const auto sibling = ftxui::Input(&siblingValue);
+    int selector = 0;
+    const auto container =
+        ftxui::Container::Vertical({sibling, menu}, &selector);
+    (void)container;
+
+    const std::string unfocused = renderPlain(menu->Render());
+    CHECK(unfocused.find('!') == std::string::npos);
+    CHECK(unfocused.find('a') != std::string::npos);
+    selector = 1;
+    CHECK(renderPlain(menu->Render()).find("a!") != std::string::npos);
+}
+
 TEST_CASE("grid/cells pad to the column width") {
     std::vector<std::string> entries = {"a", "long-entry"};
     int selected = 0;

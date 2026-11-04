@@ -562,6 +562,87 @@ TEST_CASE("screens/dialog buttons are appended to legacy screens") {
     CHECK(contains(appended, "[Y] Yes"));
 }
 
+TEST_CASE("screens/a squeezed quick launch section keeps its input") {
+    Fixture fixture;
+    fixture.context.quickInput = ftxui::text("quick-input");
+    fixture.context.hasQuickInput = true;
+
+    ScreenTheme screen;
+    screen.width = 30;
+    screen.blocks = json::array({
+        {{"type", "text"}, {"text", "header"}, {"height", 5}},
+        {{"type", "quickInput"}, {"title", "Section title"}, {"label", ""}},
+    });
+
+    auto renderAt = [&](int height) {
+        ftxui::Element element = renderScreen(screen, fixture.context);
+        ftxui::Screen canvas(30, height);
+        ftxui::Render(canvas, element);
+        return testfw::stripAnsi(canvas.ToString());
+    };
+
+    // The page needs seven rows. One row short, the heading gives way so the
+    // input stays usable.
+    const std::string tight = renderAt(6);
+    CHECK(contains(tight, "quick-input"));
+    CHECK_FALSE(contains(tight, "Section title"));
+
+    // With room to spare nothing is dropped.
+    const std::string roomy = renderAt(9);
+    CHECK(contains(roomy, "Section title"));
+    CHECK(contains(roomy, "quick-input"));
+}
+
+TEST_CASE("screens/scrollHorizontally pans content through a narrow view") {
+    auto view = [](int offset) {
+        ftxui::Element element =
+            scrollHorizontally(ftxui::text("abcdef"), offset);
+        ftxui::Screen canvas(3, 1);
+        ftxui::Render(canvas, element);
+        return testfw::stripAnsi(canvas.ToString());
+    };
+    CHECK_EQ(view(0), "abc");
+    CHECK_EQ(view(2), "bcd");
+    CHECK_EQ(view(5), "def");
+    // Past the end the view stays on the last column.
+    CHECK_EQ(view(99), "def");
+}
+
+TEST_CASE("screens/renderScrollingText centers what fits and pans the rest") {
+    MenuTheme theme;
+
+    ftxui::Screen roomy(10, 1);
+    ftxui::Render(roomy, renderScrollingText(theme, "abc", 10, 0));
+    CHECK_EQ(testfw::stripAnsi(roomy.ToString()), "   abc    ");
+
+    ftxui::Screen tight(4, 1);
+    ftxui::Render(tight, renderScrollingText(theme, "abcdefgh", 4, 6));
+    CHECK_EQ(testfw::stripAnsi(tight.ToString()), "efgh");
+}
+
+TEST_CASE("screens/renderTinyHint shows the theme text and scrolls it") {
+    MenuTheme theme;
+    theme.tinyHintText = "TOO SMALL";
+
+    auto view = [&](int width, int offset) {
+        ftxui::Element element = renderTinyHint(theme, width, 1, offset);
+        ftxui::Screen canvas(width, 1);
+        ftxui::Render(canvas, element);
+        return testfw::stripAnsi(canvas.ToString());
+    };
+
+    CHECK_EQ(view(12, 0), " TOO SMALL  ");
+    // On a four-column terminal the offsets walk across every character.
+    CHECK_EQ(view(4, 0), "TOO ");
+    CHECK_EQ(view(4, 5), "SMAL");
+    CHECK_EQ(view(4, 8), "MALL");
+
+    // The hint is ordinary theme markup.
+    theme.tinyHintText = "<warning>HI</warning>";
+    theme.variables["warning"] = "#ff0000";
+    CHECK_EQ(view(6, 0), "  HI  ");
+}
+
 TEST_CASE("screens/every default screen renders") {
     Fixture fixture;
     fixture.context.pathText = "D:/work";

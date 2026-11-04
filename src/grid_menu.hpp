@@ -27,6 +27,12 @@ struct GridMenuOptions {
     std::function<std::string(int, const std::string&)> format;
     // Multi-line entries: takes precedence over |format| when set.
     std::function<std::vector<std::string>(int, const std::string&)> format_lines;
+    // Extra line set for the selected cell while the grid owns the focus. An
+    // empty result falls back to |format_lines| so a focused row never loses
+    // its styling. Both variants are measured for the column width, which
+    // keeps the layout stable when the selection moves.
+    std::function<std::vector<std::string>(int, const std::string&)>
+        focused_format_lines;
     std::function<void()> on_change;
     std::function<void(int)> on_enter;
     std::function<void(int)> on_right_click;
@@ -60,8 +66,8 @@ public:
     int columns() const;
 
 private:
-    std::vector<std::string> EntryLines(int index,
-                                        const std::string& entry) const;
+    std::vector<std::string> EntryLines(int index, const std::string& entry,
+                                        bool focused) const;
     int ResolveColumns(int cellWidth, int entryCount) const;
     void EnsureColumns();
     void Select(int index);

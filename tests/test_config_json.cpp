@@ -230,6 +230,9 @@ TEST_CASE("config/settingsFromDefault reads the embedded defaults") {
     CHECK_FALSE(settings.launchCommand.posix.empty());
     CHECK_FALSE(settings.claudeConfigDir.empty());
     CHECK_FALSE(settings.tempDir.empty());
+    CHECK_EQ(settings.defaultProjectName,
+             document.at("defaultProjectName").get<std::string>());
+    CHECK(settings.defaultProjectName.empty());
 }
 
 TEST_CASE("config/settingsFromDefault accepts string forms") {
@@ -237,11 +240,13 @@ TEST_CASE("config/settingsFromDefault accepts string forms") {
     document["claudePath"] = "bin/claude";
     document["claudeExclude"] = "ClaudeX*";
     document["launchCommand"] = "{claude}";
+    document["defaultProjectName"] = "<accent>Starter</accent>";
     const Settings settings = settingsFromDefault(document);
     CHECK_EQ(settings.claudePath, std::vector<std::string>{"bin/claude"});
     CHECK_EQ(settings.claudeExclude, std::vector<std::string>{"ClaudeX*"});
     CHECK_EQ(settings.launchCommand.windows, "{claude}");
     CHECK_EQ(settings.launchCommand.posix, "{claude}");
+    CHECK_EQ(settings.defaultProjectName, "<accent>Starter</accent>");
 }
 
 TEST_CASE("config/stringListField only accepts all-string arrays") {
@@ -293,6 +298,36 @@ TEST_CASE("config/menuThemeFromDocument keeps defaults for missing optional keys
     CHECK_EQ(theme.recentTitleFormat, defaults.recentTitleFormat);
     CHECK_EQ(theme.recentLimit, defaults.recentLimit);
     CHECK_EQ(theme.variables.at("brand"), "#ff0000");
+}
+
+TEST_CASE("config/menuThemeFromDocument reads the tiny terminal hint") {
+    const MenuTheme defaults = menuThemeFromDocument(embeddedDefaultTheme());
+    CHECK(defaults.tinyHintEnabled);
+    CHECK_EQ(defaults.tinyHintText, "PLEASE GIVE A BIGGER PLACE");
+    CHECK_EQ(defaults.tinyHintMinWidth, 30);
+    CHECK_EQ(defaults.tinyHintMinHeight, 6);
+
+    // Older themes that predate the hint inherit the default values.
+    json document = embeddedDefaultTheme();
+    for (const char* key : {"tinyHintEnabled", "tinyHintText",
+                            "tinyHintMinWidth", "tinyHintMinHeight"}) {
+        document.erase(key);
+    }
+    const MenuTheme fallback = menuThemeFromDocument(document, &defaults);
+    CHECK_EQ(fallback.tinyHintEnabled, defaults.tinyHintEnabled);
+    CHECK_EQ(fallback.tinyHintText, defaults.tinyHintText);
+    CHECK_EQ(fallback.tinyHintMinWidth, defaults.tinyHintMinWidth);
+    CHECK_EQ(fallback.tinyHintMinHeight, defaults.tinyHintMinHeight);
+
+    document["tinyHintEnabled"] = false;
+    document["tinyHintText"] = "GROW";
+    document["tinyHintMinWidth"] = 40;
+    document["tinyHintMinHeight"] = 10;
+    const MenuTheme custom = menuThemeFromDocument(document, &defaults);
+    CHECK_FALSE(custom.tinyHintEnabled);
+    CHECK_EQ(custom.tinyHintText, "GROW");
+    CHECK_EQ(custom.tinyHintMinWidth, 40);
+    CHECK_EQ(custom.tinyHintMinHeight, 10);
 }
 
 TEST_CASE("config/projectNameDisplay parses aliases and falls back") {

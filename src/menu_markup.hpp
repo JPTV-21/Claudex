@@ -6,6 +6,7 @@
 #include <ftxui/dom/elements.hpp>
 
 #include <array>
+#include <functional>
 #include <map>
 #include <optional>
 #include <string>
@@ -73,6 +74,18 @@ ftxui::Element renderMenuMarkup(
     const std::map<std::string, std::string>* variables = nullptr,
     int maxWidth = 0);
 
+// The single entry point for theme-authored text: markup tags such as <red>,
+// <bold>, and names from the theme's variables resolve through the theme.
+ftxui::Element renderThemeText(const MenuTheme& theme, const std::string& text,
+                               int maxWidth = 0);
+
+// Makes |options| render its placeholder with theme markup instead of plain
+// text. Content typed into the field stays literal, so a path keeps any '<'
+// or '>' characters. |theme| and |placeholder| must outlive the input.
+void applyThemePlaceholder(ftxui::InputOption& options,
+                           const MenuTheme& theme,
+                           const std::string* placeholder = nullptr);
+
 // Display width of the text after markup tags are removed.
 int menuMarkupDisplayWidth(
     const std::string& text,
@@ -107,12 +120,24 @@ ftxui::Element styleMenuEntry(
     const std::string& inactivePrefix, bool inverseHighlight,
     const std::map<std::string, std::string>* variables, int maxWidth = 0);
 
-// Expands {path}/{lastUsed}/{name} (and the <...> spellings) in each entry
-// line. The name is expanded last, so markup inside it is never expanded again.
-// Lines that end up empty are dropped; an entirely empty entry falls back to
-// the path.
+// Expands {path}/{lastUsed}/{name}/{nameOrPath}/{pathIfNamed}/{pathIfUnnamed}
+// (and their <...> spellings) in each entry line. A name counts as present only
+// when its markup renders to visible text. Substitution is a single pass, so
+// text inserted for one token is never expanded again. Lines that end up empty
+// are dropped; an entirely empty entry falls back to the path.
 std::vector<std::string> expandEntryLines(
     const std::vector<std::string>& lines, const std::string& name,
+    const std::string& path, const std::string& lastUsed,
+    const std::map<std::string, std::string>* variables);
+
+// Chooses the templates for one list row and expands them. For a focused row,
+// |focusedLines| is tried first; when it produces no visible line, the base
+// template (|entryLines|, else one line from |entryFormat|) is used instead.
+// Only when that is empty too does the row fall back to the bare path.
+std::vector<std::string> entryLinesFor(
+    const std::vector<std::string>& focusedLines,
+    const std::vector<std::string>& entryLines,
+    const std::string& entryFormat, bool focused, const std::string& name,
     const std::string& path, const std::string& lastUsed,
     const std::map<std::string, std::string>* variables);
 

@@ -275,6 +275,7 @@ bin/
   "tempDir": "data/tmp",
   "logFile": "claudex.log",
   "tabOnlySectionSwitch": false,
+  "defaultProjectName": "",
   "projects": [
     {
       "path": "../my-project",
@@ -299,6 +300,7 @@ bin/
 | `tempDir` | 默认 `launchCommand` 用作 `TEMP`、`TMP` 和 `TMPDIR` 的便携临时文件夹。默认为 `data/tmp`。 |
 | `logFile` | 启动器诊断日志。为空则禁用日志。 |
 | `tabOnlySectionSwitch` | 为 `false`（默认）时，Up/Down 也会在列表首行/末行处切换主界面区域。为 `true` 时，只有 Tab/Shift+Tab 切换区域。顺序遵循 `screens.main.blocks` 布局。 |
+| `defaultProjectName` | 添加项目时预填到可选名称输入框的默认名字。为空（默认）则保持输入框空白。只影响新增项目，不影响编辑；与手动输入的名字一样会去掉首尾空白，允许 markup。 |
 | `projects[].path` | 启动 Claude 的文件夹。相对路径从启动器文件夹开始，保存时保持相对形式。 |
 | `projects[].lastUsed` | 启动项目时更新的时间戳。用于最近列表；新添加的项目在首次启动前保持为空。 |
 
@@ -327,6 +329,10 @@ bin/
   "activePrefix": "> ",
   "inactivePrefix": "  ",
   "hintText": "<graydark>Up/Down select, Enter launches, Tab switches sections.</graydark>",
+  "tinyHintEnabled": true,
+  "tinyHintText": "PLEASE GIVE A BIGGER PLACE",
+  "tinyHintMinWidth": 30,
+  "tinyHintMinHeight": 6,
   "pathPlaceholder": "{drive}/Projects/my-project",
   "projectNamePlaceholder": "Optional display name, markup allowed",
   "recentTitleFormat": "<graydark>Recent</graydark>",
@@ -364,15 +370,18 @@ bin/
 | `projectNameDisplay` | 可选项目名称的绘制位置：`both`（默认；固定列表和最近列表）、`pinned`（仅项目列表）、`recent`（仅最近列表）或 `none`。当列表不显示名称时，`{name}`/`<name>` 展开为空，只由它组成的行会被丢弃。 |
 | `addProjectLabel` | 最后一行添加项目行的标签；允许 markup。 |
 | `hintText` | 没有状态消息时显示的提示行。 |
-| `projectNamePlaceholder` | 添加/编辑界面中项目名称字段的提示。路径模板会被展开。 |
-| `pathPlaceholder` | 添加项目路径字段的提示。支持 `{drive}`、`{home}`、`{root}` 等路径模板；为空则隐藏。 |
+| `tinyHintEnabled` | 当终端小于 `tinyHintMinWidth` × `tinyHintMinHeight` 时，改为绘制 `tinyHintText` 而不是各个页面。设为 `false` 可让 Claudex 无论终端多小都尝试绘制正常界面。 |
+| `tinyHintText` | 备用提示消息，允许 markup。当它比终端更宽时，会逐列滚动，确保每个字符都能被读到。 |
+| `tinyHintMinWidth` / `tinyHintMinHeight` | 低于此终端尺寸时启用备用提示；`0` 表示不按该维度判断。默认分别为 `30` 和 `6`。 |
+| `projectNamePlaceholder` | 添加/编辑界面中项目名称字段的提示。路径模板会被展开；允许 markup。 |
+| `pathPlaceholder` | 添加项目路径字段的提示。支持 `{drive}`、`{home}`、`{root}` 等路径模板；允许 markup；为空则隐藏。 |
 | `footerAlign` / `footerLines` | 页脚对齐方式和完整页脚行列表。 |
 | `recentTitleFormat` | `recentList` 块显示的标题。为空则隐藏标题。 |
 | `recentEntryFormat` | 最近行模板。支持 `<path>`/`{path}`、`<name>`/`{name}` 和 `<lastUsed>`/`{lastUsed}`；允许 markup。 |
 | `recentEmptyText` | `recentList` 块没有条目时显示的文本。为空则隐藏该块。 |
 | `recentLimit` | 最近行的默认最大数量；`0` 禁用列表。块的 `limit` 会覆盖它。 |
 | `quickInputLabel` | 主界面快速启动输入框前方的标签。允许 markup；为空则隐藏。 |
-| `quickInputPlaceholder` | 快速启动输入框中的占位符。路径模板会被展开。 |
+| `quickInputPlaceholder` | 快速启动输入框中的占位符。路径模板会被展开；允许 markup。输入的路径始终保持字面文本。 |
 | `pathContinueLabel` / `pathCancelLabel` | 添加/编辑路径界面上的可点击按钮。允许 markup。 |
 | `confirmCreateLabel` / `confirmCreateBackLabel` | “创建此文件夹？”对话框上的可点击按钮。允许 markup。 |
 | `confirmRemoveLabel` / `confirmRemoveBackLabel` | “移除项目？”对话框上的可点击按钮。允许 markup。 |
@@ -453,9 +462,11 @@ bin/
 占位符展开之后解析。
 
 Markup 适用于 `titleFormat`、`hintText`、`footerLines`、`addProjectLabel`、
-`projectEntryFormat`、`activePrefix`/`inactivePrefix`、所有 `projectMenu`
-文本字段和动作标签、主题 `messages`，以及所有渲染文本的屏幕块（包括
-`status`、`statusOrHint` 和 `error`）。高亮的项目行仍然使用反色视频。
+`projectEntryFormat`、`activePrefix`/`inactivePrefix`、`pathPlaceholder`、
+`projectNamePlaceholder`、`quickInputPlaceholder`、`tinyHintText`、所有
+`projectMenu` 文本字段和动作标签、主题 `messages`，以及所有渲染文本的屏幕
+块（包括 `status`、`statusOrHint` 和 `error`）。输入框中键入的文本始终按
+字面处理，因此路径可以包含 `<` 和 `>`。高亮的项目行仍然使用反色视频。
 
 ### 自定义屏幕（完全控制布局） <a id="custom-screens-full-layout-control"></a>
 
@@ -508,10 +519,10 @@ Markup 适用于 `titleFormat`、`hintText`、`footerLines`、`addProjectLabel`�
 | `text` | 字面或模板文本。`align`、`if`、`unless`。 |
 | `separator` | 分隔线。可用 `style`、`character` 覆盖。`vertical: true`（或 `orientation: "vertical"`）绘制一条填满所在行高度的一列线条，因此可用作 `hbox` 列之间的分隔线。 |
 | `blank` | 一个空行。 |
-| `projectList` | 项目列表。`entryLines`（行模板数组，见下文）、`entryFormat`、`activePrefix`、`inactivePrefix`、`addProject`（默认 `true`）、`inverseHighlight`（默认 `true`）、`maxHeight`（默认 `10`）、`scroll`、`frame`，以及下面的网格键。 |
-| `recentList` | 最近启动的项目，最新的在前。`entryLines`、`limit`（默认 `recentLimit`）、`title`（默认 `recentTitleFormat`）、`titleAlign`（默认 `left`）、`entryFormat`（默认 `recentEntryFormat`）、`activePrefix`、`inactivePrefix`、`inverseHighlight`、`maxHeight`、`scroll`、`frame`、`emptyText`（默认 `recentEmptyText`），以及下面的网格键。没有条目时隐藏，除非设置了 `emptyText`。 |
-| `quickInput` | 一次性启动的输入行。`title`（在输入框上方绘制的标题，使其像 `recentList` 一样成为独立区域）、`titleAlign`（默认使用块的 `align`）、`label`（默认 `quickInputLabel`；当标题已经表明字段用途时设为 `""`）。输入的文件夹不会加入配置。 |
-| `actionList` | 项目动作列表。`inverseHighlight`（默认 `true`）、`maxHeight`、`scroll`、`frame`，以及下面的网格键。 |
+| `projectList` | 项目列表。`entryLines`（行模板数组，见下文）、`focusedEntryLines`（焦点行的行模板）、`entryFormat`、`activePrefix`、`inactivePrefix`、`addProject`（默认 `true`）、`inverseHighlight`（默认 `true`）、`maxHeight`（默认 `10`）、`scroll`、`scrollbar`、`frame`，以及下面的网格键。 |
+| `recentList` | 最近启动的项目，最新的在前。`entryLines`、`focusedEntryLines`、`limit`（默认 `recentLimit`）、`title`（默认 `recentTitleFormat`）、`titleAlign`（默认 `left`）、`entryFormat`（默认 `recentEntryFormat`）、`activePrefix`、`inactivePrefix`、`inverseHighlight`、`maxHeight`、`scroll`、`scrollbar`、`frame`、`emptyText`（默认 `recentEmptyText`），以及下面的网格键。没有条目时隐藏，除非设置了 `emptyText`。 |
+| `quickInput` | 一次性启动的输入行。`title`（在输入框上方绘制的标题，使其像 `recentList` 一样成为独立区域）、`titleAlign`（默认使用块的 `align`）、`label`（默认 `quickInputLabel`；当标题已经表明字段用途时设为 `""`）。输入的文件夹不会加入配置。页面高度不足以同时显示两者时，标题会先收起，让输入框保持可用。 |
+| `actionList` | 项目动作列表。`inverseHighlight`（默认 `true`）、`maxHeight`、`scroll`、`scrollbar`、`frame`，以及下面的网格键。 |
 | `buttons` | 当前页面的可点击 Back/Confirm 按钮（别名 `dialogButtons`）。按钮标签来自上面的主题键。没有此块的主题会在页面末尾追加按钮。 |
 | `pathInput` | 路径输入行。 |
 | `status` / `hint` / `statusOrHint` | 状态消息、提示行，或两者（默认）。文本按 markup 渲染。 |
@@ -526,19 +537,75 @@ Markup 适用于 `titleFormat`、`hintText`、`footerLines`、`addProjectLabel`�
 区域会绘制光标（`activePrefix` 加反色高亮）。用鼠标悬停在某一行或某个区域
 上会移动该焦点。
 
-列表可以通过 `entryLines`（一个行模板数组）渲染多行条目：
+列表可以通过 `entryLines`（一个行模板数组）渲染多行条目。可选的
+`focusedEntryLines` 是第二个数组，只用于当前拥有键盘焦点的行：
 
 ```json
 { "type": "projectList",
-  "entryLines": ["{name}", "<muted>{path}</muted>"] }
+  "entryLines": ["{nameOrPath}"],
+  "focusedEntryLines": ["{name}", "<muted>{path}</muted>"] }
 ```
 
-每一行支持 `{name}`、`{path}`，以及（仅最近列表）`{lastUsed}`，还有它们
-的 `<...>` 写法。名称最后展开，因此项目名称中的 markup 会按原样使用。展开
-后为空的行走会被丢弃，没有任何剩余行的条目会回退到其路径，因此没有名称的
-项目仍然渲染为单行。`projectNameDisplay` 可以在任一列表中抑制名称；被抑制
-的名称在这里也会展开为空字符串。光标前缀放在第一行，续行会缩进以对齐。
-`entryLines` 优先于 `entryFormat`。
+每一行支持以下占位符，`{...}` 与 `<...>` 两种写法都可以：
+
+| 占位符 | 展开结果 |
+| --- | --- |
+| `{name}` | 项目的显示名（可能为空）。 |
+| `{path}` | 保存的项目路径。 |
+| `{lastUsed}` | 最近列表的时间戳（仅最近列表）。 |
+| `{nameOrPath}` | 名字有可见文本时用名字；否则用路径。 |
+| `{pathIfNamed}` | 只有存在可见名字时才输出路径；否则为空。 |
+| `{pathIfUnnamed}` | 只有不存在可见名字时才输出路径；否则为空。 |
+
+名字只有在 markup 渲染后仍有可见文本时才算存在，因此 `<red></red>` 这类
+名字等同于没有名字。替换是单次扫描：名字或路径中的 markup、占位符或看似
+占位符的文本会原样插入，不会被再次展开。展开后为空的行走会被丢弃；没有任何
+剩余行的条目会回退到裸路径。光标前缀放在第一行，续行会缩进以对齐。
+
+每一行的模板优先级：
+
+1. 如果该行是焦点行（所在列表拥有键盘焦点且该行被选中），并且
+   `focusedEntryLines` 非空，先尝试它。
+2. 如果它没有产生任何可见行，改用基础模板。
+3. 基础模板在 `entryLines` 非空时用它；否则用 `entryFormat` 的一行。
+4. 只有基础模板也为空时，才回退到裸路径。
+
+`entryLines` 仍然优先于 `entryFormat`。`+ Add project` 行永远不套这些模板。
+`projectNameDisplay` 可以在任一列表中抑制名称；被抑制的名称会按“没有名字”
+展开，因此 `{nameOrPath}` 变成路径，`{pathIfNamed}` 变成空。
+
+两个列表块都可以使用这些常用显示规则：
+
+```json
+// 有名字用名字，没名字用路径。
+"entryLines": ["{nameOrPath}"]
+
+// 无论有没有名字都显示路径（无名字时第一行自动消失）。
+"entryLines": ["{name}", "<muted>{path}</muted>"]
+
+// 焦点行：名字+路径；其他行：只显示名字（无名则路径）。
+"entryLines": ["{nameOrPath}"],
+"focusedEntryLines": ["{name}", "<muted>{path}</muted>"]
+
+// 焦点行：只显示名字（无名则路径）；其他行：名字+路径。
+"entryLines": ["{name}", "<muted>{path}</muted>"],
+"focusedEntryLines": ["{nameOrPath}"]
+```
+
+如果希望“只有路径的项目”也获得与名字相同的强调，同时有名字的项目仍显示
+暗色路径：
+
+```json
+"entryLines": [
+  "<bold>{nameOrPath}</bold>",
+  "<muted>{pathIfNamed}</muted>"
+]
+```
+
+有名字时：加粗名字 + 暗色路径；没名字时：加粗路径，第二行自动消失，不会
+重复。这正是随附默认主题的写法；如果需要强制白色前景，把 `<bold>` 换成
+`<bold><white>`。如果希望只有路径的项目保持暗色，继续使用
+`["{name}", "<muted>{path}</muted>"]` 即可。
 
 列表接受网格键：
 
@@ -549,9 +616,41 @@ Markup 适用于 `titleFormat`、`hintText`、`footerLines`、`addProjectLabel`�
 | `columnGap` | 单元格之间的空格数；默认 `2`。 |
 | `pageRows` | PageUp/PageDown 移动的行数；默认 `5`。 |
 
+网格使用 `focusedEntryLines` 时，焦点与非焦点两种变体都会参与列宽计算，
+因此移动光标不会让整个网格重排。较宽的焦点模板可能让 `columns: "auto"`
+选择更少的列；设置固定的 `cellWidth` 可以避免。
+
 在网格中，Up/Down 按行移动，Left/Right 在行内移动。列表只会在第一个和最后
 一个条目处把方向键交还给区域切换器，因此它会一直滚动到真正的末尾。
 Left/Right 在单列列表上不做任何事，从而留给文本字段使用。
+
+`scroll` 和 `frame` 是每个列表块自己的键；随附的默认主题在三个列表块上都
+开启了它们，因此放不下的列表会滚动，而不是被直接裁掉。开启后，高度限制和
+滚动条都按实际渲染的行数计算，而不是条目数：一个占两行的条目就占两行。
+可选的 `scrollbar` 对象用于设置滚动条样式：
+
+| 键 | 含义 |
+| --- | --- |
+| `position` | `right`（默认）或 `left`。 |
+| `width` | 厚度（列数）；默认 `1`。 |
+| `maxWidth` | `width` 的上限；`0`（默认）表示不设上限。 |
+| `color` | 前景色，可使用主题变量或字面颜色。未设置时继承列表块的 `color`。 |
+| `backgroundColor`（别名 `bgColor`） | 背景色。未设置时跟随列表内容。 |
+| `characters` | 单格字形：`full`（占满整行两半）、`top` 和 `bottom`（滑块两端的半格）、`empty`（轨道）。默认依次为 `"┃"`、`"╻"`、`"╹"`、`" "`。 |
+
+```json
+{ "type": "projectList",
+  "scrollbar": {
+    "position": "left",
+    "width": 2,
+    "color": "accent",
+    "characters": { "full": "█", "top": "▄", "bottom": "▀", "empty": "░" }
+  } }
+```
+
+`top` 和 `bottom` 指的是滑块的两端，因此默认的 `top` 字形 `"╻"` 只填充所在
+单元格的下半部分。滚动条始终至少给内容留一列；当页面比 `width` 更窄时，它会
+收窄而不是盖住列表。
 
 公共块键：`width`、`height`、`maxWidth`、`maxHeight`、`minWidth`、
 `minHeight`、`align`、`color`、`backgroundColor`（别名 `bgColor`）、

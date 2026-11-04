@@ -160,6 +160,7 @@ bool ConfigManager::save(std::string& error) {
     document["tempDir"] = settings.tempDir;
     document["logFile"] = settings.logFile;
     document["tabOnlySectionSwitch"] = settings.tabOnlySectionSwitch;
+    document["defaultProjectName"] = settings.defaultProjectName;
     materializeConfigDefaults(document, defaultDocument_);
 
     json projectArray = json::array();
@@ -425,6 +426,12 @@ void ConfigManager::loadSettings(const json& document) {
         document["tabOnlySectionSwitch"].is_boolean()) {
         settings.tabOnlySectionSwitch =
             document["tabOnlySectionSwitch"].get<bool>();
+    }
+    if (document.contains("defaultProjectName") &&
+        document["defaultProjectName"].is_string()) {
+        // An empty value is meaningful: do not prefill the name field.
+        settings.defaultProjectName =
+            document["defaultProjectName"].get<std::string>();
     }
 }
 

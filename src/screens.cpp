@@ -71,6 +71,33 @@ Element alignElement(Element element, const std::string& alignment) {
     return element;
 }
 
+Element scrollHorizontally(Element content, int offset) {
+    // The frame scrolls to the focused position, so a point focus at |offset|
+    // pans the content without having to slice the (possibly multi-byte)
+    // text by hand.
+    return std::move(content) | focusPosition(std::max(0, offset), 0) | xframe;
+}
+
+Element renderScrollingText(const MenuTheme& theme, const std::string& text,
+                            int width, int offset) {
+    if (text.empty() || width <= 0) {
+        return ftxui::text("");
+    }
+    Element line = renderThemeText(theme, text);
+    if (menuMarkupDisplayWidth(text, &theme.variables) <= width) {
+        return alignElement(std::move(line), "center");
+    }
+    return scrollHorizontally(std::move(line), offset);
+}
+
+Element renderTinyHint(const MenuTheme& theme, int width, int height,
+                       int offset) {
+    if (width <= 0 || height <= 0) {
+        return ftxui::text("");
+    }
+    return renderScrollingText(theme, theme.tinyHintText, width, offset);
+}
+
 std::map<std::string, std::string> blockPlaceholders(
     const BlockRenderContext& context) {
     return {{"path", context.pathText},
@@ -289,33 +316,33 @@ void renderBlockElements(const json& block,
         if (!context.statusText.empty()) {
             produced.push_back(
                 hbox({text(" "),
-                      renderMenuMarkup(context.statusText, &theme.variables)}));
+                      renderThemeText(theme, context.statusText)}));
         }
     } else if (type == "hint") {
         if (context.statusText.empty()) {
             produced.push_back(
                 hbox({text(" "),
-                      renderMenuMarkup(expandBlockText(theme.hintText,
-                                                       context),
-                                       &theme.variables)}));
+                      renderThemeText(theme,
+                                      expandBlockText(theme.hintText,
+                                                      context))}));
         }
     } else if (type == "statusorhint") {
         if (!context.statusText.empty()) {
             produced.push_back(
                 hbox({text(" "),
-                      renderMenuMarkup(context.statusText, &theme.variables)}));
+                      renderThemeText(theme, context.statusText)}));
         } else {
             produced.push_back(
                 hbox({text(" "),
-                      renderMenuMarkup(expandBlockText(theme.hintText,
-                                                       context),
-                                       &theme.variables)}));
+                      renderThemeText(theme,
+                                      expandBlockText(theme.hintText,
+                                                      context))}));
         }
     } else if (type == "error") {
         if (!context.errorText.empty()) {
             produced.push_back(
                 hbox({text(" "),
-                      renderMenuMarkup(context.errorText, &theme.variables)}));
+                      renderThemeText(theme, context.errorText)}));
         } else {
             appendRenderedText(jsonStringField(block, "fallback", ""),
                                align, context, produced, textWidth, textLines);
@@ -352,8 +379,7 @@ void renderBlockElements(const json& block,
         }
         for (const std::string& part : rendered) {
             produced.push_back(alignMenuLine(
-                renderMenuMarkup(part, &theme.variables, textWidth),
-                footerAlign));
+                renderThemeText(theme, part, textWidth), footerAlign));
         }
     } else if (type == "projectlist") {
         if (context.hasProjectList && context.projectList) {
@@ -380,16 +406,25 @@ void renderBlockElements(const json& block,
             // way recentList draws its heading above the list.
             const std::string title = jsonStringField(block, "title", "");
             if (!title.empty()) {
+                const std::size_t firstTitleLine = produced.size();
                 appendRenderedText(
                     title, jsonStringField(block, "titleAlign", align),
                     context, produced, textWidth, textLines);
+                // The input is the feature; the heading only labels it. When
+                // vertical space is so tight that the section cannot show
+                // both, let the heading collapse first instead of pushing the
+                // input out of the page.
+                for (std::size_t i = firstTitleLine; i < produced.size();
+                     ++i) {
+                    produced[i] = std::move(produced[i]) | yflex_shrink;
+                }
             }
             const std::string label = jsonStringField(
                 block, "label", theme.quickInputLabel);
             if (!label.empty()) {
                 produced.push_back(hbox(
-                    {renderMenuMarkup(expandBlockText(label, context),
-                                      &theme.variables),
+                    {renderThemeText(theme,
+                                     expandBlockText(label, context)),
                      text(" "),
                      context.quickInput | flex}));
             } else {

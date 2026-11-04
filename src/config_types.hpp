@@ -38,6 +38,8 @@ struct Settings {
     std::string tempDir;
     std::string logFile;
     bool tabOnlySectionSwitch = false;
+    // Prefilled into the optional name field when a project is added.
+    std::string defaultProjectName;
 };
 
 struct Project {
@@ -125,6 +127,11 @@ struct MenuTheme {
     std::string projectNamePlaceholder;
     std::string quickInputLabel;
     std::string quickInputPlaceholder;
+    // Fallback page for terminals too small to draw any of the screens.
+    bool tinyHintEnabled = true;
+    std::string tinyHintText = "PLEASE GIVE A BIGGER PLACE";
+    int tinyHintMinWidth = 30;
+    int tinyHintMinHeight = 6;
     std::string pathContinueLabel;
     std::string pathCancelLabel;
     std::string confirmCreateLabel;

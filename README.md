@@ -316,6 +316,7 @@ disable logging.
   "tempDir": "data/tmp",
   "logFile": "claudex.log",
   "tabOnlySectionSwitch": false,
+  "defaultProjectName": "",
   "projects": [
     {
       "path": "../my-project",
@@ -341,6 +342,7 @@ be listed more than once.
 | `tempDir` | Portable temporary folder used by the default `launchCommand` for `TEMP`, `TMP`, and `TMPDIR`. Defaults to `data/tmp`. |
 | `logFile` | Launcher diagnostics log. Empty disables logging. |
 | `tabOnlySectionSwitch` | When `false` (default), Up/Down also move between main-screen sections at a list's first/last row. When `true`, only Tab/Shift+Tab switch sections. The order follows the `screens.main.blocks` layout. |
+| `defaultProjectName` | Prefilled into the optional project-name field when a project is added. Empty (the default) leaves the field blank. Only affects new projects, not edits; the value is trimmed like a typed name and may contain markup. |
 | `projects[].path` | Folder to start Claude in. Relative paths start at the launcher folder and stay relative when saved. |
 | `projects[].lastUsed` | Timestamp updated when a project is launched. Drives the recent list; a newly added project stays empty until it is launched. |
 
@@ -371,6 +373,10 @@ with tags instead of separate `titleColor`, `titleBold`, etc. keys:
   "activePrefix": "> ",
   "inactivePrefix": "  ",
   "hintText": "<graydark>Up/Down select, Enter launches, Tab switches sections.</graydark>",
+  "tinyHintEnabled": true,
+  "tinyHintText": "PLEASE GIVE A BIGGER PLACE",
+  "tinyHintMinWidth": 30,
+  "tinyHintMinHeight": 6,
   "pathPlaceholder": "{drive}/Projects/my-project",
   "projectNamePlaceholder": "Optional display name, markup allowed",
   "recentTitleFormat": "<graydark>Recent</graydark>",
@@ -408,15 +414,18 @@ with tags instead of separate `titleColor`, `titleBold`, etc. keys:
 | `projectNameDisplay` | Where the optional project name is drawn: `both` (default; pinned and recent lists), `pinned` (project list only), `recent` (recent list only), or `none`. When a list does not show names, `{name}`/`<name>` expands to nothing and a line made only of it is dropped. |
 | `addProjectLabel` | Label for the final add-project row; markup is allowed. |
 | `hintText` | Hint line shown when there is no status. |
-| `projectNamePlaceholder` | Hint shown in the project-name field on the add/edit screen. Path templates are expanded. |
-| `pathPlaceholder` | Hint shown in the add-project path field. Supports path templates such as `{drive}`, `{home}`, and `{root}`; empty hides it. |
+| `tinyHintEnabled` | Draw `tinyHintText` instead of the pages while the terminal is smaller than `tinyHintMinWidth` × `tinyHintMinHeight`. Set to `false` to always draw the normal UI, however small the terminal is. |
+| `tinyHintText` | Fallback message, markup is allowed. When it is wider than the terminal it scrolls a column at a time so every character can still be read. |
+| `tinyHintMinWidth` / `tinyHintMinHeight` | Terminal size below which the fallback takes over; `0` disables that dimension. Defaults are `30` and `6`. |
+| `projectNamePlaceholder` | Hint shown in the project-name field on the add/edit screen. Path templates are expanded; markup is allowed. |
+| `pathPlaceholder` | Hint shown in the add-project path field. Supports path templates such as `{drive}`, `{home}`, and `{root}`; markup is allowed; empty hides it. |
 | `footerAlign` / `footerLines` | Footer alignment and complete footer line list. |
 | `recentTitleFormat` | Heading shown by a `recentList` block. Empty hides the heading. |
 | `recentEntryFormat` | Recent row template. Supports `<path>`/`{path}`, `<name>`/`{name}` and `<lastUsed>`/`{lastUsed}`; markup is allowed. |
 | `recentEmptyText` | Text shown when a `recentList` block has no entries. Empty hides the block. |
 | `recentLimit` | Default maximum number of recent rows; `0` disables the list. A block's `limit` overrides it. |
 | `quickInputLabel` | Label in front of the main-screen quick-launch input. Markup is allowed; empty hides it. |
-| `quickInputPlaceholder` | Placeholder in the quick-launch input. Path templates are expanded. |
+| `quickInputPlaceholder` | Placeholder in the quick-launch input. Path templates are expanded; markup is allowed. Typed paths stay literal. |
 | `pathContinueLabel` / `pathCancelLabel` | Clickable buttons on the add/edit path screen. Markup is allowed. |
 | `confirmCreateLabel` / `confirmCreateBackLabel` | Clickable buttons on the "create this folder?" dialog. Markup is allowed. |
 | `confirmRemoveLabel` / `confirmRemoveBackLabel` | Clickable buttons on the "remove project?" dialog. Markup is allowed. |
@@ -505,10 +514,12 @@ Markup is parsed after placeholders such as `<root>` and `<project>` are
 expanded.
 
 Markup applies to `titleFormat`, `hintText`, `footerLines`, `addProjectLabel`,
-`projectEntryFormat`, `activePrefix`/`inactivePrefix`, all `projectMenu` text
-fields and action labels, theme `messages`, and every screen block that renders
-text (including `status`, `statusOrHint`, and `error`). The highlighted project
-row still uses inverse video.
+`projectEntryFormat`, `activePrefix`/`inactivePrefix`, `pathPlaceholder`,
+`projectNamePlaceholder`, `quickInputPlaceholder`, `tinyHintText`, all
+`projectMenu` text fields and action labels, theme `messages`, and every screen
+block that renders text (including `status`, `statusOrHint`, and `error`). Text
+typed into an input is always literal, so a path can contain `<` and `>`. The
+highlighted project row still uses inverse video.
 
 ### Custom screens (full layout control)
 
@@ -562,10 +573,10 @@ Blocks:
 | `text` | Literal or template text. `align`, `if`, `unless`. |
 | `separator` | Separator line. `style`, `character` overrides. `vertical: true` (or `orientation: "vertical"`) draws a one-column line that fills the height of its row, so it works as a divider between `hbox` columns. |
 | `blank` | One empty row. |
-| `projectList` | Project list. `entryLines` (array of line templates, see below), `entryFormat`, `activePrefix`, `inactivePrefix`, `addProject` (default `true`), `inverseHighlight` (default `true`), `maxHeight` (default `10`), `scroll`, `frame`, plus the grid keys below. |
-| `recentList` | Recently launched projects, newest first. `entryLines`, `limit` (default `recentLimit`), `title` (default `recentTitleFormat`), `titleAlign` (default `left`), `entryFormat` (default `recentEntryFormat`), `activePrefix`, `inactivePrefix`, `inverseHighlight`, `maxHeight`, `scroll`, `frame`, `emptyText` (default `recentEmptyText`), plus the grid keys below. Hidden while there are no entries unless `emptyText` is set. |
-| `quickInput` | Input row for a one-time launch. `title` (heading drawn above the input, which makes it a section like `recentList`), `titleAlign` (default the block `align`), `label` (default `quickInputLabel`; set to `""` when the title already names the field). The typed folder is not added to the config. |
-| `actionList` | Project action list. `inverseHighlight` (default `true`), `maxHeight`, `scroll`, `frame`, plus the grid keys below. |
+| `projectList` | Project list. `entryLines` (array of line templates, see below), `focusedEntryLines` (templates for the focused row), `entryFormat`, `activePrefix`, `inactivePrefix`, `addProject` (default `true`), `inverseHighlight` (default `true`), `maxHeight` (default `10`), `scroll`, `scrollbar`, `frame`, plus the grid keys below. |
+| `recentList` | Recently launched projects, newest first. `entryLines`, `focusedEntryLines`, `limit` (default `recentLimit`), `title` (default `recentTitleFormat`), `titleAlign` (default `left`), `entryFormat` (default `recentEntryFormat`), `activePrefix`, `inactivePrefix`, `inverseHighlight`, `maxHeight`, `scroll`, `scrollbar`, `frame`, `emptyText` (default `recentEmptyText`), plus the grid keys below. Hidden while there are no entries unless `emptyText` is set. |
+| `quickInput` | Input row for a one-time launch. `title` (heading drawn above the input, which makes it a section like `recentList`), `titleAlign` (default the block `align`), `label` (default `quickInputLabel`; set to `""` when the title already names the field). The typed folder is not added to the config. When the page is too short to show both, the title collapses first so the input stays usable. |
+| `actionList` | Project action list. `inverseHighlight` (default `true`), `maxHeight`, `scroll`, `scrollbar`, `frame`, plus the grid keys below. |
 | `buttons` | Clickable Back/Confirm buttons for the current page (alias `dialogButtons`). The button labels come from the theme keys above. Themes without this block get the buttons appended at the end of the page. |
 | `pathInput` | The path input row. |
 | `status` / `hint` / `statusOrHint` | Status message, hint line, or either (the default). Text is rendered as markup. |
@@ -581,21 +592,81 @@ that currently has keyboard focus draws its cursor (`activePrefix` plus the
 inverse highlight). Hovering a row or a section with the mouse moves that focus.
 
 Lists can render multi-line entries with `entryLines`, an array of line
-templates:
+templates. `focusedEntryLines` is an optional second array used only for the
+row that has keyboard focus:
 
 ```json
 { "type": "projectList",
-  "entryLines": ["{name}", "<muted>{path}</muted>"] }
+  "entryLines": ["{nameOrPath}"],
+  "focusedEntryLines": ["{name}", "<muted>{path}</muted>"] }
 ```
 
-Each line supports `{name}`, `{path}`, and (recent only) `{lastUsed}`, plus
-their `<...>` spellings. The name is expanded last, so markup inside a project
-name is used as written. A line that expands to nothing is dropped, and an
-entry with no lines left falls back to its path, so projects without a name
-still render as a single row. `projectNameDisplay` can suppress the name in
-either list; a suppressed name expands to an empty string here too. The cursor
+Each line supports these placeholders, with either `{...}` or `<...>`
+spelling:
+
+| Placeholder | Expands to |
+| --- | --- |
+| `{name}` | The project's display name (may be empty). |
+| `{path}` | The stored project path. |
+| `{lastUsed}` | The recent-list timestamp (recent list only). |
+| `{nameOrPath}` | The name when it has visible text; otherwise the path. |
+| `{pathIfNamed}` | The path only when a visible name exists; otherwise empty. |
+| `{pathIfUnnamed}` | The path only when no visible name exists; otherwise empty. |
+
+A name counts as present only when its markup renders to visible text, so a
+name such as `<red></red>` behaves like no name. Substitution is a single
+pass: markup, placeholders, or token-looking text inside a name or path are
+inserted literally and never expanded again. A line that expands to nothing is
+dropped; an entry with no lines left falls back to its bare path. The cursor
 prefix goes on the first line and continuation lines are indented to match.
-`entryLines` takes priority over `entryFormat`.
+
+Template priority for each row:
+
+1. If the row is focused (its list has keyboard focus and the row is selected)
+   and `focusedEntryLines` is non-empty, its lines are tried first.
+2. If that produces no visible line, the base template is used instead.
+3. The base template is `entryLines` when non-empty; otherwise one line from
+   `entryFormat`.
+4. Only when that is empty too does the row fall back to the bare path.
+
+`entryLines` still takes priority over `entryFormat`. The `+ Add project` row
+never uses either template. `projectNameDisplay` can suppress the name in
+either list; a suppressed name expands as if the project had no name, so
+`{nameOrPath}` becomes the path and `{pathIfNamed}` becomes empty.
+
+Common display rules, for either list block:
+
+```json
+// Name when present, path when not.
+"entryLines": ["{nameOrPath}"]
+
+// Always show the path (the name line disappears for unnamed projects).
+"entryLines": ["{name}", "<muted>{path}</muted>"]
+
+// Focused row: name and path. Other rows: name only (path when unnamed).
+"entryLines": ["{nameOrPath}"],
+"focusedEntryLines": ["{name}", "<muted>{path}</muted>"]
+
+// Focused row: name only (path when unnamed). Other rows: name and path.
+"entryLines": ["{name}", "<muted>{path}</muted>"],
+"focusedEntryLines": ["{nameOrPath}"]
+```
+
+To make a path-only project use the same emphasis as a named one while still
+showing the muted path for named projects:
+
+```json
+"entryLines": [
+  "<bold>{nameOrPath}</bold>",
+  "<muted>{pathIfNamed}</muted>"
+]
+```
+
+A named project renders a bold name plus a muted path. An unnamed project
+renders a bold path and no second line. This is the shipped default theme; use
+`<bold><white>` instead of `<bold>` if you also want to force a white
+foreground. To keep path-only rows muted, simply keep the earlier
+`["{name}", "<muted>{path}</muted>"]` form.
 
 Lists accept grid keys:
 
@@ -606,10 +677,45 @@ Lists accept grid keys:
 | `columnGap` | Spaces between cells; default `2`. |
 | `pageRows` | Rows moved by PageUp/PageDown; default `5`. |
 
+When `focusedEntryLines` is used in a grid, both the focused and unfocused
+variants are measured for the column width, so moving the cursor never reflows
+the grid. A wider focused template can therefore make `columns: "auto"` choose
+fewer columns; set a fixed `cellWidth` to avoid that.
+
 In a grid, Up/Down move by a row and Left/Right move within a row. A list only
 hands an arrow key back to the section switcher at its first and last entry, so
 it keeps scrolling until it really ends. Left/Right do nothing on a
 single-column list, which leaves them free for the text field.
+
+`scroll` and `frame` are per-block keys; the shipped default theme enables them
+on all three list blocks, so a list that no longer fits in the page scrolls
+instead of being clipped. When enabled, height limits and the scrollbar count
+rendered lines, not entries: a two-line entry occupies two rows. An optional
+`scrollbar` object styles the bar:
+
+| Key | Meaning |
+| --- | --- |
+| `position` | `right` (default) or `left`. |
+| `width` | Thickness in columns; default `1`. |
+| `maxWidth` | Upper bound for `width`; `0` (default) leaves it uncapped. |
+| `color` | Foreground color, as a theme variable or literal. Unset inherits the list block's `color`. |
+| `backgroundColor` (alias `bgColor`) | Background color. Unset follows the list content. |
+| `characters` | One-cell glyphs: `full` (both halves of a row), `top` and `bottom` (the half-covered rows at the thumb's ends), and `empty` (the track). Defaults are `"┃"`, `"╻"`, `"╹"`, and `" "`. |
+
+```json
+{ "type": "projectList",
+  "scrollbar": {
+    "position": "left",
+    "width": 2,
+    "color": "accent",
+    "characters": { "full": "█", "top": "▄", "bottom": "▀", "empty": "░" }
+  } }
+```
+
+`top` and `bottom` name the end of the thumb, so the default `top` glyph `"╻"`
+fills the lower half of its cell. A bar always leaves at least one column for
+the content; on a page narrower than `width`, it shrinks rather than covering
+the list.
 
 Common block keys: `width`, `height`, `maxWidth`, `maxHeight`, `minWidth`,
 `minHeight`, `align`, `color`, `backgroundColor` (alias `bgColor`),

@@ -60,7 +60,14 @@ int GridMenuComponent::ResolveColumns(int cellWidth, int entryCount) const {
 }
 
 std::vector<std::string> GridMenuComponent::EntryLines(
-    int index, const std::string& entry) const {
+    int index, const std::string& entry, bool focused) const {
+    if (focused && options_.focused_format_lines) {
+        std::vector<std::string> lines =
+            options_.focused_format_lines(index, entry);
+        if (!lines.empty()) {
+            return lines;
+        }
+    }
     if (options_.format_lines) {
         std::vector<std::string> lines = options_.format_lines(index, entry);
         if (lines.empty()) {
@@ -80,10 +87,19 @@ void GridMenuComponent::EnsureColumns() {
     int widest = 0;
     for (int i = 0; i < static_cast<int>(entries_->size()); ++i) {
         const std::string& entry = (*entries_)[static_cast<std::size_t>(i)];
-        const std::vector<std::string> lines = EntryLines(i, entry);
+        const std::vector<std::string> lines = EntryLines(i, entry, false);
         for (const std::string& line : lines) {
             widest = std::max(
                 widest, menuMarkupDisplayWidth(line, options_.variables));
+        }
+        if (options_.focused_format_lines) {
+            const std::vector<std::string> focusedLines =
+                EntryLines(i, entry, true);
+            for (const std::string& line : focusedLines) {
+                widest = std::max(
+                    widest,
+                    menuMarkupDisplayWidth(line, options_.variables));
+            }
         }
     }
     const int prefixWidth =
@@ -114,15 +130,34 @@ Element GridMenuComponent::OnRender() {
         return text("");
     }
 
+    const int selected =
+        std::clamp(*selected_, 0, static_cast<int>(entries.size()) - 1);
+    const bool focused = Focused();
+
     std::vector<std::vector<std::string>> labels;
     labels.reserve(entries.size());
     int widest = 0;
     for (int i = 0; i < static_cast<int>(entries.size()); ++i) {
-        labels.push_back(EntryLines(i, entries[static_cast<std::size_t>(i)]));
-        for (const std::string& line : labels.back()) {
+        const std::string& entry = entries[static_cast<std::size_t>(i)];
+        const std::vector<std::string> normal = EntryLines(i, entry, false);
+        std::vector<std::string> focusLines;
+        if (options_.focused_format_lines) {
+            // Measure the focused variant for every cell, not just the
+            // selection, so moving the cursor never reflows the grid.
+            focusLines = EntryLines(i, entry, true);
+            for (const std::string& line : focusLines) {
+                widest = std::max(
+                    widest,
+                    menuMarkupDisplayWidth(line, options_.variables));
+            }
+        }
+        for (const std::string& line : normal) {
             widest = std::max(
                 widest, menuMarkupDisplayWidth(line, options_.variables));
         }
+        const bool useFocusLines =
+            focused && i == selected && options_.focused_format_lines;
+        labels.push_back(useFocusLines ? std::move(focusLines) : normal);
     }
 
     const int prefixWidth =
@@ -140,10 +175,7 @@ Element GridMenuComponent::OnRender() {
         ResolveColumns(cellWidth, static_cast<int>(entries.size()));
     columns_ = columns;
 
-    const int selected =
-        std::clamp(*selected_, 0, static_cast<int>(entries.size()) - 1);
     cells_.assign(entries.size(), Box{});
-    const bool focused = Focused();
 
     Elements rows;
     for (int row = 0; row * columns < static_cast<int>(entries.size()); ++row) {

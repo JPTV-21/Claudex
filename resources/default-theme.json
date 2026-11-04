@@ -39,6 +39,10 @@
   "activePrefix": "> ",
   "inactivePrefix": "  ",
   "hintText": "<muted>Up/Down select, Enter launches, Tab switches sections.</muted>",
+  "tinyHintEnabled": true,
+  "tinyHintText": "PLEASE GIVE A BIGGER PLACE",
+  "tinyHintMinWidth": 30,
+  "tinyHintMinHeight": 6,
   "pathPlaceholder": "{drive}/Projects/my-project",
   "footerAlign": "center",
   "footerLines": [
@@ -81,7 +85,12 @@
         {
           "type": "projectList",
           "maxHeight": "listHeight",
-          "entryLines": ["{name}", "<muted>{path}</muted>"]
+          "scroll": true,
+          "frame": true,
+          "entryLines": [
+            "<bold>{nameOrPath}</bold>",
+            "<muted>{pathIfNamed}</muted>"
+          ]
         },
         {
           "type": "quickInput",
@@ -92,7 +101,12 @@
         {
           "type": "recentList",
           "separatorBefore": true,
-          "entryLines": ["{name}", "<muted>{path}</muted>"]
+          "scroll": true,
+          "frame": true,
+          "entryLines": [
+            "<bold>{nameOrPath}</bold>",
+            "<muted>{pathIfNamed}</muted>"
+          ]
         },
         { "type": "separator" },
         { "type": "statusOrHint" },
@@ -167,7 +181,7 @@
           "width": 48,
           "align": "center",
           "children": [
-            { "type": "actionList" }
+            { "type": "actionList", "scroll": true, "frame": true }
           ]
         },
         {

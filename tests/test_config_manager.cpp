@@ -64,6 +64,8 @@ TEST_CASE("manager/defaults match the embedded resources") {
     CHECK_EQ(config.settings.claudeConfigDir, defaults.claudeConfigDir);
     CHECK_EQ(config.settings.tempDir, defaults.tempDir);
     CHECK_EQ(config.settings.logFile, defaults.logFile);
+    CHECK_EQ(config.settings.defaultProjectName,
+             defaults.defaultProjectName);
 }
 
 TEST_CASE("manager/save then load round-trips projects") {
@@ -308,7 +310,8 @@ TEST_CASE("manager/reads every setting") {
         "claudeConfigDir": "cfg",
         "tempDir": "scratch",
         "logFile": "",
-        "tabOnlySectionSwitch": true
+        "tabOnlySectionSwitch": true,
+        "defaultProjectName": "<accent>Starter</accent>"
     })");
     ConfigManager config(root.path(), configPath(root));
     config.load();
@@ -321,6 +324,7 @@ TEST_CASE("manager/reads every setting") {
     CHECK_EQ(config.settings.claudeConfigDir, "cfg");
     CHECK_EQ(config.settings.tempDir, "scratch");
     CHECK(config.settings.tabOnlySectionSwitch);
+    CHECK_EQ(config.settings.defaultProjectName, "<accent>Starter</accent>");
     CHECK(config.logFilePath().empty());
     CHECK(pathsEqual(config.claudeConfigDir(), root.path() / "cfg"));
     CHECK(pathsEqual(config.tempDir(), root.path() / "scratch"));
@@ -460,12 +464,54 @@ TEST_CASE("manager/wrongly typed values are reported as issues") {
     TempDir root;
     json document = embeddedDefaultConfig();
     document["tabOnlySectionSwitch"] = "yes";
+    document["defaultProjectName"] = 7;
     writeFile(configPath(root), document.dump(2));
     ConfigManager config(root.path(), configPath(root));
     config.load();
     CHECK(hasIssue(config, "tabOnlySectionSwitch: wrong type"));
-    // The bad value is ignored while loading.
+    CHECK(hasIssue(config, "defaultProjectName: wrong type"));
+    // The bad values are ignored while loading.
     CHECK_FALSE(config.settings.tabOnlySectionSwitch);
+    CHECK(config.settings.defaultProjectName.empty());
+}
+
+TEST_CASE("manager/defaultProjectName round-trips through save and load") {
+    TempDir root;
+    {
+        ConfigManager config(root.path(), configPath(root));
+        config.load();
+        config.settings.defaultProjectName = "<accent>Starter</accent>";
+        std::string error;
+        REQUIRE(config.save(error));
+        CHECK(error.empty());
+    }
+
+    CHECK_EQ(readJson(configPath(root))
+                 .at("defaultProjectName")
+                 .get<std::string>(),
+             "<accent>Starter</accent>");
+
+    ConfigManager reloaded(root.path(), configPath(root));
+    reloaded.load();
+    CHECK_EQ(reloaded.settings.defaultProjectName,
+             "<accent>Starter</accent>");
+}
+
+TEST_CASE("manager/a missing defaultProjectName is repaired to empty") {
+    TempDir root;
+    json document = embeddedDefaultConfig();
+    document.erase("defaultProjectName");
+    writeFile(configPath(root), document.dump(2));
+
+    ConfigManager config(root.path(), configPath(root));
+    config.load();
+    CHECK(hasIssue(config, "defaultProjectName: missing"));
+    std::string error;
+    REQUIRE(config.repair(error));
+    CHECK_EQ(readJson(configPath(root))
+                 .at("defaultProjectName")
+                 .get<std::string>(),
+             "");
 }
 
 // --- theme file --------------------------------------------------------------

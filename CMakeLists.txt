@@ -8,7 +8,7 @@ if(MSVC)
         "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()
 
-project(ClaudeX VERSION 1.2.0 LANGUAGES CXX)
+project(ClaudeX VERSION 1.3.0 LANGUAGES CXX)
 
 set(CLAUDEX_AUTHOR "Wind_Blood")
 
@@ -137,6 +137,7 @@ add_library(claudex_ui STATIC
     src/screens.cpp
     src/grid_menu.cpp
     src/key_events.cpp
+    src/scroll_bar.cpp
 )
 target_link_libraries(claudex_ui PUBLIC claudex_core ftxui::ftxui)
 claudex_apply_warnings(claudex_ui)
