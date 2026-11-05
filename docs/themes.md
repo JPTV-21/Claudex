@@ -12,6 +12,10 @@ the page structure itself (see
 at startup. Theme changes are read at startup, so restart Claudex after editing
 the theme.
 
+> **Security note.** `launchCommand` and custom project actions are run by the
+> platform shell, so a theme file can execute commands. Only use a
+> `claudex-theme.json` from a source you trust.
+
 There is one title only: `titleFormat`. Colors and bold are written inline
 with tags instead of separate `titleColor`, `titleBold`, etc. keys:
 

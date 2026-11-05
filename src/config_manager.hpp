@@ -103,6 +103,11 @@ private:
     json defaultThemeDocument_;
     json themeDocument_;
     fs::path themeFile_;
+    // How the last loadTheme() found the file. Only Loaded, Missing and
+    // Invalid permit a write; Unreadable is left untouched so a transient
+    // read failure never destroys an existing theme.
+    enum class ThemeLoadState { Loaded, Missing, Invalid, Unreadable };
+    ThemeLoadState themeLoadState_ = ThemeLoadState::Loaded;
     Settings defaultSettings_;
     MenuTheme defaultMenuTheme_;
     json userDocument_;
@@ -110,10 +115,7 @@ private:
     std::string loadWarning_;
     std::string themeStatus_;
     bool themeStatusIsError_ = false;
-    bool themeFileWasMissing_ = false;
     bool themeNeedsWrite_ = false;
-    bool themeLoadHadError_ = false;
-    bool themeContentInvalid_ = false;
     bool loadHadError_ = false;
     bool fileWasMissing_ = false;
     bool backupAttempted_ = false;

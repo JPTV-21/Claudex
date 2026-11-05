@@ -145,7 +145,8 @@ struct MenuTheme {
     ProjectMenuTheme projectMenu;
 };
 
-// Looks up a status message by key; throws std::out_of_range if it is missing.
+// Looks up a status message by key. A missing key returns the key itself so a
+// theme bug never throws from an error-reporting path.
 std::string messageText(const MenuTheme& theme, const char* key);
 std::string messageText(
     const MenuTheme& theme, const char* key,

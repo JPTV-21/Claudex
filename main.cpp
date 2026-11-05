@@ -2,14 +2,18 @@
 #include "config_bootstrap.hpp"
 #include "config_json.hpp"
 #include "config_manager.hpp"
+#include "dialog_buttons.hpp"
+#include "focus_order.hpp"
 #include "grid_menu.hpp"
 #include "key_events.hpp"
 #include "launcher.hpp"
 #include "menu_markup.hpp"
 #include "path_resolver.hpp"
 #include "platform.hpp"
+#include "recent_list.hpp"
 #include "screens.hpp"
 #include "scroll_bar.hpp"
+#include "text_edit.hpp"
 #include "text_util.hpp"
 
 #include <ftxui/component/component.hpp>
@@ -39,170 +43,6 @@ using namespace claudex;
 // launcher expands wildcards itself, so keep argv exactly as typed.
 int _dowildcard = 0;
 #endif
-
-// ---------------------------------------------------------------------------
-// User interface
-// ---------------------------------------------------------------------------
-
-// Focus targets on the main page. The authored block order decides how they
-// are traversed, so the constants only identify the components.
-constexpr int kMainFocusProjects = 0;
-constexpr int kMainFocusRecent = 1;
-constexpr int kMainFocusQuickInput = 2;
-
-// Input fields on the path screen. The theme decides which ones exist and in
-// which order, so Up/Down and Tab follow the drawn layout.
-enum class PathField { Name, Path };
-
-void collectPathFieldOrder(const json& blocks, std::vector<PathField>& order) {
-    if (!blocks.is_array()) {
-        return;
-    }
-    for (const json& block : blocks) {
-        if (!block.is_object()) {
-            continue;
-        }
-        const std::string type =
-            normalizeMenuToken(jsonStringField(block, "type", ""));
-        PathField field = PathField::Path;
-        bool found = false;
-        if (type == "nameinput") {
-            field = PathField::Name;
-            found = true;
-        } else if (type == "pathinput") {
-            field = PathField::Path;
-            found = true;
-        }
-        if (found && std::find(order.begin(), order.end(), field) ==
-                         order.end()) {
-            order.push_back(field);
-        }
-        if (block.contains("children") && block["children"].is_array()) {
-            collectPathFieldOrder(block["children"], order);
-        }
-    }
-}
-
-void collectMainFocusOrder(const json& blocks, std::vector<int>& order) {
-    if (!blocks.is_array()) {
-        return;
-    }
-    for (const json& block : blocks) {
-        if (!block.is_object()) {
-            continue;
-        }
-        const std::string type =
-            normalizeMenuToken(jsonStringField(block, "type", ""));
-        int node = -1;
-        if (type == "projectlist") {
-            node = kMainFocusProjects;
-        } else if (type == "recentlist") {
-            node = kMainFocusRecent;
-        } else if (type == "quickinput") {
-            node = kMainFocusQuickInput;
-        }
-        if (node >= 0 &&
-            std::find(order.begin(), order.end(), node) == order.end()) {
-            order.push_back(node);
-        }
-        if (block.contains("children") && block["children"].is_array()) {
-            collectMainFocusOrder(block["children"], order);
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Shared mouse hit-testing
-//
-// Every clickable row stores the Box it was drawn into. reflect() refreshes
-// those boxes on each draw, and the root event handler maps mouse coordinates
-// back to rows with the helpers below. The main lists, the project action list
-// and the dialog buttons all use the same mechanism.
-// ---------------------------------------------------------------------------
-
-const Box kEmptyHitBox{1, 0, 1, 0};
-
-int mouseRowAt(const std::vector<Box>& boxes, const Mouse& mouse) {
-    for (int row = 0; row < static_cast<int>(boxes.size()); ++row) {
-        const Box& box = boxes[static_cast<std::size_t>(row)];
-        if (!box.IsEmpty() && box.Contain(mouse.x, mouse.y)) {
-            return row;
-        }
-    }
-    return -1;
-}
-
-bool mouseInside(const Box& box, const Mouse& mouse) {
-    return !box.IsEmpty() && box.Contain(mouse.x, mouse.y);
-}
-
-// A horizontal row of clickable labels. The labels are markup, hovered buttons
-// invert, and a left click runs the matching callback. Keyboard shortcuts are
-// handled separately by the page handlers, so the bar stays mouse-only.
-struct DialogButtonBar {
-    std::vector<std::string> labels;
-    std::vector<Box> boxes;
-    int hovered = -1;
-    std::function<void(int)> on_click;
-
-    void set(std::vector<std::string> newLabels,
-             std::function<void(int)> click) {
-        labels = std::move(newLabels);
-        on_click = std::move(click);
-        boxes.assign(labels.size(), kEmptyHitBox);
-        hovered = -1;
-    }
-
-    void clear() {
-        labels.clear();
-        boxes.clear();
-        hovered = -1;
-        on_click = nullptr;
-    }
-
-    Element render(const MenuTheme& theme) {
-        Elements row;
-        for (int i = 0; i < static_cast<int>(labels.size()); ++i) {
-            if (i != 0) {
-                row.push_back(text("   "));
-            }
-            Element button =
-                renderThemeText(theme, labels[static_cast<std::size_t>(i)]);
-            if (i == hovered) {
-                button = button | inverted;
-            }
-            button = button | reflect(boxes[static_cast<std::size_t>(i)]);
-            row.push_back(std::move(button));
-        }
-        return hbox(std::move(row)) | hcenter;
-    }
-
-    bool handle(Event& event) {
-        if (!event.is_mouse()) {
-            return false;
-        }
-        const Mouse& mouse = event.mouse();
-        const int row = mouseRowAt(boxes, mouse);
-        if (mouse.button == Mouse::None && mouse.motion == Mouse::Moved) {
-            if (row != hovered) {
-                hovered = row;
-                return true;
-            }
-            return false;
-        }
-        if (mouse.button == Mouse::Left && mouse.motion == Mouse::Pressed) {
-            if (row >= 0 && on_click) {
-                // Keep the callback alive even if the action switches pages
-                // and replaces this bar's callback.
-                auto click = on_click;
-                click(row);
-                return true;
-            }
-            return false;
-        }
-        return false;
-    }
-};
 
 int main(int argc, char** argv) {
     const fs::path executableDir = executableDirectory(
@@ -426,11 +266,7 @@ int main(int argc, char** argv) {
     };
 
     auto focusIndexOf = [&](int node) -> int {
-        auto found =
-            std::find(mainFocusOrder.begin(), mainFocusOrder.end(), node);
-        return found == mainFocusOrder.end()
-                   ? -1
-                   : static_cast<int>(found - mainFocusOrder.begin());
+        return claudex::focusIndexOf(mainFocusOrder, node);
     };
     auto currentFocusNode = [&]() -> int {
         if (mainFocus < 0 ||
@@ -664,59 +500,19 @@ int main(int argc, char** argv) {
     };
 
     auto refreshRecent = [&]() {
-        const int keepProject =
-            recentSelected >= 0 &&
-                    recentSelected <
-                        static_cast<int>(recentProjectIndices.size())
-                ? recentProjectIndices[static_cast<std::size_t>(
-                      recentSelected)]
-                : -1;
+        const std::vector<int> previousIndices = recentProjectIndices;
         recentMenuEntries.clear();
-        recentProjectIndices.clear();
-        if (recentLimit > 0) {
-            std::vector<int> indices;
-            indices.reserve(config.projects.size());
-            for (int i = 0;
-                 i < static_cast<int>(config.projects.size()); ++i) {
-                if (!config.projects[static_cast<std::size_t>(i)]
-                         .lastUsed.empty()) {
-                    indices.push_back(i);
-                }
-            }
-            std::stable_sort(
-                indices.begin(), indices.end(), [&](int lhs, int rhs) {
-                    return config.projects[static_cast<std::size_t>(lhs)]
-                               .lastUsed >
-                           config.projects[static_cast<std::size_t>(rhs)]
-                               .lastUsed;
-                });
-            if (static_cast<int>(indices.size()) > recentLimit) {
-                indices.resize(static_cast<std::size_t>(recentLimit));
-            }
-            for (int index : indices) {
-                const Project& project =
-                    config.projects[static_cast<std::size_t>(index)];
-                // The entry text is built at render time from the project,
-                // so the name is available too.
-                recentMenuEntries.push_back(project.path);
-                recentProjectIndices.push_back(index);
-            }
+        recentProjectIndices =
+            claudex::recentProjectIndices(config.projects, recentLimit);
+        for (int index : recentProjectIndices) {
+            // The entry text is built at render time from the project, so the
+            // name is available too.
+            recentMenuEntries.push_back(
+                config.projects[static_cast<std::size_t>(index)].path);
         }
         recentRowBoxes.assign(recentMenuEntries.size(), kEmptyHitBox);
-        if (recentMenuEntries.empty()) {
-            recentSelected = 0;
-        } else {
-            auto kept = std::find(recentProjectIndices.begin(),
-                                  recentProjectIndices.end(), keepProject);
-            if (kept != recentProjectIndices.end()) {
-                recentSelected =
-                    static_cast<int>(kept - recentProjectIndices.begin());
-            } else {
-                recentSelected = std::clamp(
-                    recentSelected, 0,
-                    static_cast<int>(recentMenuEntries.size()) - 1);
-            }
-        }
+        recentSelected = keptSelectionIndex(previousIndices, recentSelected,
+                                            recentProjectIndices);
         if (focusIs(kMainFocusRecent) && recentMenuEntries.empty()) {
             if (!setFocusNode(kMainFocusProjects)) {
                 mainFocus = 0;
@@ -1269,16 +1065,14 @@ int main(int argc, char** argv) {
     auto recentMenu =
         Menu(&recentMenuEntries, &recentSelected, recentMenuOptions);
 
-    const json* recentListBlockForGrid =
-        findBlockByType(screenBlocks("main"), "recentList");
     int recentGridColumns = 0;
     bool recentGridAuto = false;
     const bool recentUsesGrid = gridSpecFor(
-        recentListBlockForGrid, recentGridColumns, recentGridAuto);
+        recentListBlock, recentGridColumns, recentGridAuto);
     std::shared_ptr<GridMenuComponent> recentGrid;
     if (recentUsesGrid) {
         GridMenuOptions options = makeGridOptions(
-            recentListBlockForGrid, recentGridColumns, recentGridAuto,
+            recentListBlock, recentGridColumns, recentGridAuto,
             recentActivePrefix, recentInactivePrefix, recentInverseHighlight);
         options.format_lines = [&](int index, const std::string&) {
             return recentLinesFor(index, false);
@@ -1590,30 +1384,18 @@ int main(int argc, char** argv) {
     // order, with an empty recent list skipped because its Menu is not
     // focusable.
     auto moveMainFocus = [&](int step, bool wrap) {
-        std::vector<int> available;
-        for (int i = 0;
-             i < static_cast<int>(mainFocusOrder.size()); ++i) {
+        std::vector<bool> enabled(mainFocusOrder.size(), true);
+        for (int i = 0; i < static_cast<int>(mainFocusOrder.size()); ++i) {
             if (mainFocusOrder[static_cast<std::size_t>(i)] ==
                     kMainFocusRecent &&
                 recentMenuEntries.empty()) {
-                continue;
+                enabled[static_cast<std::size_t>(i)] = false;
             }
-            available.push_back(i);
         }
-        if (available.empty()) {
-            return;
+        const int next = moveEnabledIndex(enabled, mainFocus, step, wrap);
+        if (next >= 0) {
+            mainFocus = next;
         }
-        auto found = std::find(available.begin(), available.end(), mainFocus);
-        int position =
-            found == available.end() ? 0 : static_cast<int>(found - available.begin());
-        int next = position + step;
-        if (wrap) {
-            next = (next + static_cast<int>(available.size())) %
-                   static_cast<int>(available.size());
-        } else if (next < 0 || next >= static_cast<int>(available.size())) {
-            return;
-        }
-        mainFocus = available[static_cast<std::size_t>(next)];
     };
 
     // Arrow keys move to the section that is actually in that direction. The
@@ -1885,18 +1667,13 @@ int main(int argc, char** argv) {
     };
     // Moves the path-screen focus one field in the authored layout order.
     auto movePathField = [&](int step, bool wrap) -> bool {
-        const int count = static_cast<int>(pathFieldOrder.size());
-        if (count == 0) {
+        const std::vector<bool> enabled(pathFieldOrder.size(), true);
+        const int next =
+            moveEnabledIndex(enabled, pathFocus, step, wrap);
+        if (next < 0) {
             return false;
         }
-        int index = std::clamp(pathFocus, 0, count - 1);
-        index += step;
-        if (wrap) {
-            index = (index % count + count) % count;
-        } else if (index < 0 || index >= count) {
-            return false;
-        }
-        pathFocus = index;
+        pathFocus = next;
         return true;
     };
     // Moves the path-screen focus to the input the theme actually drew in
@@ -1924,23 +1701,296 @@ int main(int argc, char** argv) {
         pathFocus = target;
         return true;
     };
-    // True when the caret has another wrapped line in that direction, in
-    // which case the Input should move the cursor instead of the focus.
-    auto cursorHasLine = [](const std::string& text, int cursor, bool down) {
-        const std::size_t position = static_cast<std::size_t>(
-            std::clamp(cursor, 0, static_cast<int>(text.size())));
-        if (down) {
-            return position < text.size() &&
-                   text.find('\n', position) != std::string::npos;
+    // Page key routing. Each handler owns one page; root() dispatches after
+    // the cross-page Shift+Enter handling.
+
+    auto handleMainEvent = [&](Event event) -> bool {
+        // Mouse-wheel focus can land on a section that just became empty;
+        // pull focus back to the project list.
+        if (focusIs(kMainFocusRecent) && recentMenuEntries.empty()) {
+            if (!setFocusNode(kMainFocusProjects)) {
+                mainFocus = 0;
+            }
         }
-        return position > 0 &&
-               text.rfind('\n', position - 1) != std::string::npos;
+        if (event.is_mouse() && handleMainMouse(event)) {
+            return true;
+        }
+        if (event == Event::Tab) {
+            moveMainFocus(+1, true);
+            return true;
+        }
+        if (event == Event::TabReverse) {
+            moveMainFocus(-1, true);
+            return true;
+        }
+
+        const bool quickFocused = focusIs(kMainFocusQuickInput);
+        if (quickFocused) {
+            // Up/Down first walk the wrapped lines of a multi-line value;
+            // at the first/last line they switch sections. A single-line
+            // field keeps its cursor-to-end behavior when Tab is the only
+            // section switch.
+            if (event == Event::ArrowUp || event == Event::ArrowDown) {
+                const bool down = event == Event::ArrowDown;
+                if (quickInput.find('\n') != std::string::npos) {
+                    if (cursorHasLine(quickInput, quickInputCursor,
+                                      down)) {
+                        return false;
+                    }
+                    if (!tabOnlySectionSwitch) {
+                        focusDirection(down ? NavDir::Down : NavDir::Up);
+                    }
+                    return true;
+                }
+                if (!tabOnlySectionSwitch) {
+                    focusDirection(down ? NavDir::Down : NavDir::Up);
+                    return true;
+                }
+                const bool atBoundary =
+                    down ? quickInputCursor >=
+                               static_cast<int>(quickInput.size())
+                         : quickInputCursor <= 0;
+                return atBoundary;
+            }
+            if (event == Event::ArrowLeft || event == Event::ArrowRight) {
+                // Left/Right edit the text; only at the ends do they act
+                // like Up/Down and change sections.
+                const bool left = event == Event::ArrowLeft;
+                const bool atEdge =
+                    left ? quickInputCursor <= 0
+                         : quickInputCursor >=
+                               static_cast<int>(quickInput.size());
+                if (!atEdge) {
+                    return false;
+                }
+                if (!tabOnlySectionSwitch) {
+                    focusDirection(left ? NavDir::Left : NavDir::Right);
+                }
+                return true;
+            }
+            if (event == Event::PageUp || event == Event::PageDown) {
+                // These have no meaning in a single-line field, and
+                // letting them reach the container would jump sections.
+                return true;
+            }
+            // Esc leaves the input instead of quitting the launcher, and
+            // every other key belongs to the text field.
+            if (event == Event::Escape) {
+                if (!setFocusNode(kMainFocusProjects)) {
+                    mainFocus = 0;
+                }
+                return true;
+            }
+            return false;
+        }
+        if (eventMatchesAny(event,
+                            config.menuTheme.keys.quickInput)) {
+            if (setFocusNode(kMainFocusQuickInput)) {
+                return true;
+            }
+        }
+        if (focusIs(kMainFocusRecent) && event == Event::Escape) {
+            if (!setFocusNode(kMainFocusProjects)) {
+                mainFocus = 0;
+            }
+            return true;
+        }
+
+        // Arrows belong to the focused list while it can still move. Once
+        // it reaches an edge, the key moves the focus to the section that
+        // is actually in that direction.
+        if (event == Event::ArrowUp || event == Event::ArrowDown ||
+            event == Event::ArrowLeft || event == Event::ArrowRight) {
+            Component focusedList;
+            if (focusIs(kMainFocusProjects)) {
+                focusedList = projectListComponent;
+            } else if (focusIs(kMainFocusRecent)) {
+                focusedList = recentListComponent;
+            }
+
+            if (focusedList && focusedList->OnEvent(event)) {
+                clearProjectStatus();
+                return true;
+            }
+
+            NavDir direction = NavDir::Down;
+            if (event == Event::ArrowUp) {
+                direction = NavDir::Up;
+            } else if (event == Event::ArrowLeft) {
+                direction = NavDir::Left;
+            } else if (event == Event::ArrowRight) {
+                direction = NavDir::Right;
+            }
+            if (focusDirection(direction)) {
+                clearProjectStatus();
+                return true;
+            }
+            if (tabOnlySectionSwitch) {
+                return true;
+            }
+            // Nothing in that direction: keep Container::Vertical's own
+            // edge behavior for Up/Down.
+            return event == Event::ArrowLeft || event == Event::ArrowRight;
+        }
+        if (eventMatchesAny(event, config.menuTheme.keys.quit)) {
+            screen.Exit();
+            return true;
+        }
+        if (eventMatchesAny(event,
+                            config.menuTheme.keys.projectMenu)) {
+            syncSelectionFromFocus();
+            beginProjectActions();
+            return true;
+        }
+        if (eventMatchesAny(event, config.menuTheme.keys.remove)) {
+            syncSelectionFromFocus();
+            beginRemove();
+            return true;
+        }
+        if (eventMatchesAny(event, config.menuTheme.keys.add)) {
+            beginAddProject();
+            return true;
+        }
+        if (event == Event::ArrowUp || event == Event::ArrowDown) {
+            clearProjectStatus();
+        }
+        return false;
     };
-    auto insertLineBreak = [](std::string& text, int& cursor) {
-        const int position =
-            std::clamp(cursor, 0, static_cast<int>(text.size()));
-        text.insert(static_cast<std::size_t>(position), 1, '\n');
-        cursor = position + 1;
+
+    auto handlePathEvent = [&](Event event) -> bool {
+        if (event.is_mouse() && dialogBar.handle(event)) {
+            return true;
+        }
+        if (event == Event::Tab) {
+            movePathField(+1, true);
+            return true;
+        }
+        if (event == Event::TabReverse) {
+            movePathField(-1, true);
+            return true;
+        }
+        if (event == Event::ArrowUp || event == Event::ArrowDown) {
+            const bool down = event == Event::ArrowDown;
+            const PathField field = pathFieldFocused();
+            const std::string& text =
+                field == PathField::Name ? projectName : pathInput;
+            const int cursor =
+                field == PathField::Name ? nameCursor : pathCursor;
+            // Stay inside a multi-line value until its first/last line;
+            // only then leave the field.
+            if (cursorHasLine(text, cursor, down)) {
+                return false;
+            }
+            movePathFieldInDirection(down ? NavDir::Down : NavDir::Up);
+            return true;
+        }
+        if (event == Event::ArrowLeft || event == Event::ArrowRight) {
+            const bool left = event == Event::ArrowLeft;
+            const PathField field = pathFieldFocused();
+            const std::string& text =
+                field == PathField::Name ? projectName : pathInput;
+            const int cursor =
+                field == PathField::Name ? nameCursor : pathCursor;
+            const bool atEdge =
+                left ? cursor <= 0
+                     : cursor >= static_cast<int>(text.size());
+            if (!atEdge) {
+                return false;
+            }
+            movePathFieldInDirection(left ? NavDir::Left
+                                          : NavDir::Right);
+            return true;
+        }
+        if (event == Event::PageUp || event == Event::PageDown) {
+            // Page keys do not scroll a single FTXUI field.
+            movePathField(event == Event::PageDown ? +1 : -1, false);
+            return true;
+        }
+        if (eventMatchesAny(event, config.menuTheme.keys.back)) {
+            pathCancelAction();
+            return true;
+        }
+        if (event == Event::Return) {
+            pathContinueAction();
+            return true;
+        }
+        return false;
+    };
+
+    auto handleConfirmCreateEvent = [&](Event event) -> bool {
+        if (event.is_mouse() && dialogBar.handle(event)) {
+            return true;
+        }
+        if (event == Event::Return ||
+            eventMatchesAny(event, config.menuTheme.keys.confirm)) {
+            createConfirmAction();
+            return true;
+        }
+        if (eventMatchesAny(event, config.menuTheme.keys.cancel)) {
+            createBackAction();
+            return true;
+        }
+        return false;
+    };
+
+    auto handleProjectActionsEvent = [&](Event event) -> bool {
+        if (event.is_mouse() && actionGrid &&
+            actionGrid->OnEvent(event)) {
+            return true;
+        }
+        if (event.is_mouse()) {
+            const Mouse& mouse = event.mouse();
+            const int row = mouseRowAt(actionRowBoxes, mouse);
+            if (mouse.button == Mouse::None &&
+                mouse.motion == Mouse::Moved) {
+                if (row >= 0) {
+                    projectActionSelected = row;
+                    return true;
+                }
+                return false;
+            }
+            if (mouse.button == Mouse::Left &&
+                mouse.motion == Mouse::Pressed) {
+                if (row >= 0) {
+                    projectActionSelected = row;
+                    activateProjectAction();
+                    return true;
+                }
+                return false;
+            }
+            // Wheel events fall through to the Menu so it can move and
+            // scroll the selection.
+            return false;
+        }
+        if (eventMatchesAny(event, config.menuTheme.keys.back)) {
+            switchPage(Page::Main);
+            return true;
+        }
+        if (event == Event::Return) {
+            if (actionGrid) {
+                // Let the component tree deliver Enter to the grid.
+                return false;
+            }
+            activateProjectAction();
+            return true;
+        }
+        return false;
+    };
+
+    auto handleConfirmRemoveEvent = [&](Event event) -> bool {
+        if (event.is_mouse() && dialogBar.handle(event)) {
+            return true;
+        }
+        if (event == Event::Return ||
+            eventMatchesAny(event, config.menuTheme.keys.confirm)) {
+            removeConfirmAction();
+            return true;
+        }
+        if (eventMatchesAny(event, config.menuTheme.keys.cancel)) {
+            removeCancelAction();
+            return true;
+        }
+        return false;
     };
 
     auto root = CatchEvent(pages, [&](Event event) {
@@ -1961,295 +2011,18 @@ int main(int argc, char** argv) {
             }
             return false;
         }
-        if (page == Page::Main) {
-            // Mouse-wheel focus can land on a section that just became empty;
-            // pull focus back to the project list.
-            if (focusIs(kMainFocusRecent) && recentMenuEntries.empty()) {
-                if (!setFocusNode(kMainFocusProjects)) {
-                    mainFocus = 0;
-                }
-            }
-            if (event.is_mouse() && handleMainMouse(event)) {
-                return true;
-            }
-            if (event == Event::Tab) {
-                moveMainFocus(+1, true);
-                return true;
-            }
-            if (event == Event::TabReverse) {
-                moveMainFocus(-1, true);
-                return true;
-            }
-
-            const bool quickFocused = focusIs(kMainFocusQuickInput);
-            if (quickFocused) {
-                // Up/Down first walk the wrapped lines of a multi-line value;
-                // at the first/last line they switch sections. A single-line
-                // field keeps its cursor-to-end behavior when Tab is the only
-                // section switch.
-                if (event == Event::ArrowUp || event == Event::ArrowDown) {
-                    const bool down = event == Event::ArrowDown;
-                    if (quickInput.find('\n') != std::string::npos) {
-                        if (cursorHasLine(quickInput, quickInputCursor,
-                                          down)) {
-                            return false;
-                        }
-                        if (!tabOnlySectionSwitch) {
-                            focusDirection(down ? NavDir::Down : NavDir::Up);
-                        }
-                        return true;
-                    }
-                    if (!tabOnlySectionSwitch) {
-                        focusDirection(down ? NavDir::Down : NavDir::Up);
-                        return true;
-                    }
-                    const bool atBoundary =
-                        down ? quickInputCursor >=
-                                   static_cast<int>(quickInput.size())
-                             : quickInputCursor <= 0;
-                    return atBoundary;
-                }
-                if (event == Event::ArrowLeft || event == Event::ArrowRight) {
-                    // Left/Right edit the text; only at the ends do they act
-                    // like Up/Down and change sections.
-                    const bool left = event == Event::ArrowLeft;
-                    const bool atEdge =
-                        left ? quickInputCursor <= 0
-                             : quickInputCursor >=
-                                   static_cast<int>(quickInput.size());
-                    if (!atEdge) {
-                        return false;
-                    }
-                    if (!tabOnlySectionSwitch) {
-                        focusDirection(left ? NavDir::Left : NavDir::Right);
-                    }
-                    return true;
-                }
-                if (event == Event::PageUp || event == Event::PageDown) {
-                    // These have no meaning in a single-line field, and
-                    // letting them reach the container would jump sections.
-                    return true;
-                }
-                // Esc leaves the input instead of quitting the launcher, and
-                // every other key belongs to the text field.
-                if (event == Event::Escape) {
-                    if (!setFocusNode(kMainFocusProjects)) {
-                        mainFocus = 0;
-                    }
-                    return true;
-                }
-                return false;
-            }
-            if (eventMatchesAny(event,
-                                config.menuTheme.keys.quickInput)) {
-                if (setFocusNode(kMainFocusQuickInput)) {
-                    return true;
-                }
-            }
-            if (focusIs(kMainFocusRecent) && event == Event::Escape) {
-                if (!setFocusNode(kMainFocusProjects)) {
-                    mainFocus = 0;
-                }
-                return true;
-            }
-
-            // Arrows belong to the focused list while it can still move. Once
-            // it reaches an edge, the key moves the focus to the section that
-            // is actually in that direction.
-            if (event == Event::ArrowUp || event == Event::ArrowDown ||
-                event == Event::ArrowLeft || event == Event::ArrowRight) {
-                Component focusedList;
-                if (focusIs(kMainFocusProjects)) {
-                    focusedList = projectListComponent;
-                } else if (focusIs(kMainFocusRecent)) {
-                    focusedList = recentListComponent;
-                }
-
-                if (focusedList && focusedList->OnEvent(event)) {
-                    clearProjectStatus();
-                    return true;
-                }
-
-                NavDir direction = NavDir::Down;
-                if (event == Event::ArrowUp) {
-                    direction = NavDir::Up;
-                } else if (event == Event::ArrowLeft) {
-                    direction = NavDir::Left;
-                } else if (event == Event::ArrowRight) {
-                    direction = NavDir::Right;
-                }
-                if (focusDirection(direction)) {
-                    clearProjectStatus();
-                    return true;
-                }
-                if (tabOnlySectionSwitch) {
-                    return true;
-                }
-                // Nothing in that direction: keep Container::Vertical's own
-                // edge behavior for Up/Down.
-                return event == Event::ArrowLeft || event == Event::ArrowRight;
-            }
-            if (eventMatchesAny(event, config.menuTheme.keys.quit)) {
-                screen.Exit();
-                return true;
-            }
-            if (eventMatchesAny(event,
-                                config.menuTheme.keys.projectMenu)) {
-                syncSelectionFromFocus();
-                beginProjectActions();
-                return true;
-            }
-            if (eventMatchesAny(event, config.menuTheme.keys.remove)) {
-                syncSelectionFromFocus();
-                beginRemove();
-                return true;
-            }
-            if (eventMatchesAny(event, config.menuTheme.keys.add)) {
-                beginAddProject();
-                return true;
-            }
-            if (event == Event::ArrowUp || event == Event::ArrowDown) {
-                clearProjectStatus();
-            }
-            return false;
+        switch (page) {
+            case Page::Main:
+                return handleMainEvent(event);
+            case Page::Path:
+                return handlePathEvent(event);
+            case Page::ConfirmCreate:
+                return handleConfirmCreateEvent(event);
+            case Page::ProjectActions:
+                return handleProjectActionsEvent(event);
+            case Page::ConfirmRemove:
+                return handleConfirmRemoveEvent(event);
         }
-
-        if (page == Page::Path) {
-            if (event.is_mouse() && dialogBar.handle(event)) {
-                return true;
-            }
-            if (event == Event::Tab) {
-                movePathField(+1, true);
-                return true;
-            }
-            if (event == Event::TabReverse) {
-                movePathField(-1, true);
-                return true;
-            }
-            if (event == Event::ArrowUp || event == Event::ArrowDown) {
-                const bool down = event == Event::ArrowDown;
-                const PathField field = pathFieldFocused();
-                const std::string& text =
-                    field == PathField::Name ? projectName : pathInput;
-                const int cursor =
-                    field == PathField::Name ? nameCursor : pathCursor;
-                // Stay inside a multi-line value until its first/last line;
-                // only then leave the field.
-                if (cursorHasLine(text, cursor, down)) {
-                    return false;
-                }
-                movePathFieldInDirection(down ? NavDir::Down : NavDir::Up);
-                return true;
-            }
-            if (event == Event::ArrowLeft || event == Event::ArrowRight) {
-                const bool left = event == Event::ArrowLeft;
-                const PathField field = pathFieldFocused();
-                const std::string& text =
-                    field == PathField::Name ? projectName : pathInput;
-                const int cursor =
-                    field == PathField::Name ? nameCursor : pathCursor;
-                const bool atEdge =
-                    left ? cursor <= 0
-                         : cursor >= static_cast<int>(text.size());
-                if (!atEdge) {
-                    return false;
-                }
-                movePathFieldInDirection(left ? NavDir::Left
-                                              : NavDir::Right);
-                return true;
-            }
-            if (event == Event::PageUp || event == Event::PageDown) {
-                // Page keys do not scroll a single FTXUI field.
-                movePathField(event == Event::PageDown ? +1 : -1, false);
-                return true;
-            }
-            if (eventMatchesAny(event, config.menuTheme.keys.back)) {
-                pathCancelAction();
-                return true;
-            }
-            if (event == Event::Return) {
-                pathContinueAction();
-                return true;
-            }
-            return false;
-        }
-
-        if (page == Page::ConfirmCreate) {
-            if (event.is_mouse() && dialogBar.handle(event)) {
-                return true;
-            }
-            if (event == Event::Return ||
-                eventMatchesAny(event, config.menuTheme.keys.confirm)) {
-                createConfirmAction();
-                return true;
-            }
-            if (eventMatchesAny(event, config.menuTheme.keys.cancel)) {
-                createBackAction();
-                return true;
-            }
-            return false;
-        }
-
-        if (page == Page::ProjectActions) {
-            if (event.is_mouse() && actionGrid &&
-                actionGrid->OnEvent(event)) {
-                return true;
-            }
-            if (event.is_mouse()) {
-                const Mouse& mouse = event.mouse();
-                const int row = mouseRowAt(actionRowBoxes, mouse);
-                if (mouse.button == Mouse::None &&
-                    mouse.motion == Mouse::Moved) {
-                    if (row >= 0) {
-                        projectActionSelected = row;
-                        return true;
-                    }
-                    return false;
-                }
-                if (mouse.button == Mouse::Left &&
-                    mouse.motion == Mouse::Pressed) {
-                    if (row >= 0) {
-                        projectActionSelected = row;
-                        activateProjectAction();
-                        return true;
-                    }
-                    return false;
-                }
-                // Wheel events fall through to the Menu so it can move and
-                // scroll the selection.
-                return false;
-            }
-            if (eventMatchesAny(event, config.menuTheme.keys.back)) {
-                switchPage(Page::Main);
-                return true;
-            }
-            if (event == Event::Return) {
-                if (actionGrid) {
-                    // Let the component tree deliver Enter to the grid.
-                    return false;
-                }
-                activateProjectAction();
-                return true;
-            }
-            return false;
-        }
-
-        if (page == Page::ConfirmRemove) {
-            if (event.is_mouse() && dialogBar.handle(event)) {
-                return true;
-            }
-            if (event == Event::Return ||
-                eventMatchesAny(event, config.menuTheme.keys.confirm)) {
-                removeConfirmAction();
-                return true;
-            }
-            if (eventMatchesAny(event, config.menuTheme.keys.cancel)) {
-                removeCancelAction();
-                return true;
-            }
-            return false;
-        }
-
         return false;
     });
 

@@ -49,10 +49,8 @@ void ConfigManager::load() {
     themeFile_.clear();
     themeStatus_.clear();
     themeStatusIsError_ = false;
-    themeFileWasMissing_ = false;
+    themeLoadState_ = ThemeLoadState::Loaded;
     themeNeedsWrite_ = false;
-    themeLoadHadError_ = false;
-    themeContentInvalid_ = false;
     projects.clear();
     userDocument_ = defaultDocument_;
 
@@ -240,7 +238,8 @@ bool ConfigManager::needsRepair() const {
         hasEmptyDefaultConfigValues(userDocument_)) {
         return true;
     }
-    return themeFileWasMissing_ || themeNeedsWrite_;
+    return themeLoadState_ == ThemeLoadState::Missing ||
+           themeLoadState_ == ThemeLoadState::Invalid || themeNeedsWrite_;
 }
 
 std::string ConfigManager::claudePathText() const {
@@ -453,15 +452,13 @@ void ConfigManager::setThemeStatus(std::string message, bool error) {
 void ConfigManager::loadTheme() {
     themeStatus_.clear();
     themeStatusIsError_ = false;
-    themeFileWasMissing_ = false;
+    themeLoadState_ = ThemeLoadState::Loaded;
     themeNeedsWrite_ = false;
-    themeLoadHadError_ = false;
-    themeContentInvalid_ = false;
 
     themeFile_ = resolveThemePath();
     const std::string themePathText = pathToUtf8(themeFile_);
     if (themeFile_.empty()) {
-        themeLoadHadError_ = true;
+        themeLoadState_ = ThemeLoadState::Unreadable;
         themeDocument_ = defaultThemeDocument_;
         menuTheme = defaultMenuTheme_;
         setThemeStatus(
@@ -475,7 +472,7 @@ void ConfigManager::loadTheme() {
     std::error_code ec;
     exists = fs::exists(themeFile_, ec);
     if (ec) {
-        themeLoadHadError_ = true;
+        themeLoadState_ = ThemeLoadState::Unreadable;
         setThemeStatus(
             messageText(defaultMenuTheme_, "themeInspectFailed",
                         {{"path", themePathText},
@@ -484,7 +481,7 @@ void ConfigManager::loadTheme() {
     } else if (exists) {
         std::ifstream input(themeFile_, std::ios::binary);
         if (!input) {
-            themeLoadHadError_ = true;
+            themeLoadState_ = ThemeLoadState::Unreadable;
             setThemeStatus(
                 messageText(defaultMenuTheme_, "themeOpenFailed",
                             {{"path", themePathText}}),
@@ -502,8 +499,7 @@ void ConfigManager::loadTheme() {
             try {
                 json document = json::parse(contents);
                 if (!document.is_object()) {
-                    themeLoadHadError_ = true;
-                    themeContentInvalid_ = true;
+                    themeLoadState_ = ThemeLoadState::Invalid;
                     setThemeStatus(
                         messageText(defaultMenuTheme_,
                                     "themeUnsupportedFormat"),
@@ -512,8 +508,7 @@ void ConfigManager::loadTheme() {
                     theme = std::move(document);
                 }
             } catch (const std::exception& exception) {
-                themeLoadHadError_ = true;
-                themeContentInvalid_ = true;
+                themeLoadState_ = ThemeLoadState::Invalid;
                 setThemeStatus(
                     messageText(defaultMenuTheme_, "themeParseFailed",
                                 {{"path", themePathText},
@@ -534,15 +529,23 @@ void ConfigManager::loadTheme() {
         log("WARN", "theme: " + warning);
     }
 
-    if (!exists && !themeLoadHadError_) {
-        themeFileWasMissing_ = true;
-        themeNeedsWrite_ = true;
+    if (!exists && themeLoadState_ == ThemeLoadState::Loaded) {
+        themeLoadState_ = ThemeLoadState::Missing;
     }
-    if (themeLoadHadError_) {
-        // Invalid JSON is recoverable: back it up to .invalid and write
-        // the merged/default theme. Read/inspect failures are not, because
-        // the existing file cannot be safely preserved.
-        themeNeedsWrite_ = themeContentInvalid_;
+    switch (themeLoadState_) {
+        case ThemeLoadState::Loaded:
+            break;
+        case ThemeLoadState::Missing:
+        case ThemeLoadState::Invalid:
+            // Invalid JSON is recoverable: back it up to .invalid and write
+            // the merged/default theme. A missing file is simply created.
+            themeNeedsWrite_ = true;
+            break;
+        case ThemeLoadState::Unreadable:
+            // Read/inspect failures are not recoverable: leave the existing
+            // file untouched because it cannot be safely preserved.
+            themeNeedsWrite_ = false;
+            break;
     }
 
     if (themeStatus_.empty()) {
@@ -551,7 +554,7 @@ void ConfigManager::loadTheme() {
         log("ERROR", "theme: " + themeStatus_);
     }
 
-    if (!themeLoadHadError_ || themeContentInvalid_) {
+    if (themeLoadState_ != ThemeLoadState::Unreadable) {
         std::string themeError;
         if (!writeThemeIfNeeded(themeError)) {
             log("ERROR", "theme: " + themeError);
@@ -566,16 +569,15 @@ bool ConfigManager::writeThemeIfNeeded(std::string& error) {
         setThemeStatus(error, true);
         return false;
     }
-    if (!themeNeedsWrite_ && !themeFileWasMissing_ &&
-        !themeContentInvalid_) {
-        return true;
-    }
-    if (themeLoadHadError_ && !themeContentInvalid_) {
+    if (themeLoadState_ == ThemeLoadState::Unreadable) {
         // The existing file could not be read; leave it untouched.
         return true;
     }
+    if (themeLoadState_ == ThemeLoadState::Loaded && !themeNeedsWrite_) {
+        return true;
+    }
 
-    const bool invalidContent = themeContentInvalid_;
+    const bool invalidContent = themeLoadState_ == ThemeLoadState::Invalid;
     std::error_code ec;
     if (!themeFile_.parent_path().empty()) {
         fs::create_directories(themeFile_.parent_path(), ec);
@@ -668,9 +670,7 @@ bool ConfigManager::writeThemeIfNeeded(std::string& error) {
             false);
     }
     themeNeedsWrite_ = false;
-    themeFileWasMissing_ = false;
-    themeLoadHadError_ = false;
-    themeContentInvalid_ = false;
+    themeLoadState_ = ThemeLoadState::Loaded;
     log("INFO", "theme written to " + pathToUtf8(themeFile_));
     return true;
 }

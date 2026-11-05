@@ -8,13 +8,16 @@
 namespace claudex {
 
 std::string messageText(const MenuTheme& theme, const char* key) {
-    return theme.messages.at(key);
+    const auto found = theme.messages.find(key);
+    // A missing key is a theme bug, not a reason to crash on an error path.
+    // Showing the key itself keeps the problem visible in the UI.
+    return found == theme.messages.end() ? std::string(key) : found->second;
 }
 
 std::string messageText(
     const MenuTheme& theme, const char* key,
     std::initializer_list<std::pair<std::string, std::string>> values) {
-    std::string text = theme.messages.at(key);
+    std::string text = messageText(theme, key);
     for (const auto& value : values) {
         replaceAll(text, "{" + value.first + "}", value.second);
     }

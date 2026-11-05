@@ -8,11 +8,12 @@ if(MSVC)
         "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()
 
-project(ClaudeX VERSION 1.3.0 LANGUAGES CXX)
+project(ClaudeX VERSION 1.4.0 LANGUAGES CXX)
 
 set(CLAUDEX_AUTHOR "Wind_Blood")
 
 option(CLAUDEX_BUILD_TESTS "Build the unit tests (run them with ctest)" ON)
+option(CLAUDEX_WERROR "Treat compiler warnings in project sources as errors" OFF)
 
 # Windows resource compiler, used to embed the application icon.
 if(WIN32)
@@ -87,9 +88,17 @@ function(claudex_apply_warnings target)
     if(MSVC)
         target_compile_options(${target} PRIVATE
             $<$<COMPILE_LANGUAGE:CXX>:/utf-8 /W4>)
+        if(CLAUDEX_WERROR)
+            target_compile_options(${target} PRIVATE
+                $<$<COMPILE_LANGUAGE:CXX>:/WX>)
+        endif()
     else()
         target_compile_options(${target} PRIVATE
             $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -Wpedantic>)
+        if(CLAUDEX_WERROR)
+            target_compile_options(${target} PRIVATE
+                $<$<COMPILE_LANGUAGE:CXX>:-Werror>)
+        endif()
     endif()
 endfunction()
 
@@ -113,6 +122,7 @@ endfunction()
 # loading, Claude discovery and process launching.
 add_library(claudex_core STATIC
     src/text_util.cpp
+    src/text_edit.cpp
     src/platform.cpp
     src/path_resolver.cpp
     src/config_types.cpp
@@ -120,6 +130,8 @@ add_library(claudex_core STATIC
     src/config_bootstrap.cpp
     src/config_manager.cpp
     src/claude_finder.cpp
+    src/focus_order.cpp
+    src/recent_list.cpp
     src/launcher.cpp
 )
 target_include_directories(claudex_core
@@ -138,6 +150,7 @@ add_library(claudex_ui STATIC
     src/grid_menu.cpp
     src/key_events.cpp
     src/scroll_bar.cpp
+    src/dialog_buttons.cpp
 )
 target_link_libraries(claudex_ui PUBLIC claudex_core ftxui::ftxui)
 claudex_apply_warnings(claudex_ui)

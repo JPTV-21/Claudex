@@ -25,6 +25,10 @@
 > It is not affiliated with, endorsed by, or supported by Anthropic. “Claude”
 > and “Claude Code” are trademarks of Anthropic. ClaudeX does not bundle Claude
 > Code; you need your own installation and account to use it.
+>
+> **Trust your theme.** `launchCommand` and custom project actions are run by
+> the platform shell, so a theme file can execute commands. Only use a
+> `claudex-theme.json` from a source you trust.
 
 ![ClaudeX demo: launch a project, quit Claude back to the launcher, switch between themes, and carry the whole setup in one folder](docs/screenshots/demo.gif)
 

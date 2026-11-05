@@ -42,15 +42,10 @@ TEST_CASE("config/messageText substitutes placeholders") {
              "Hello Ada, welcome to ClaudeX. Ada!");
 }
 
-TEST_CASE("config/messageText throws for an unknown key") {
+TEST_CASE("config/messageText falls back to the key for an unknown key") {
     MenuTheme theme;
-    bool threw = false;
-    try {
-        (void)messageText(theme, "missing");
-    } catch (const std::out_of_range&) {
-        threw = true;
-    }
-    CHECK(threw);
+    CHECK_EQ(messageText(theme, "missing"), "missing");
+    CHECK_EQ(messageText(theme, "missing", {{"name", "Ada"}}), "missing");
 }
 
 // --- keys and actions ------------------------------------------------------

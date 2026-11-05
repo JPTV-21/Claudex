@@ -10,6 +10,9 @@
 `resources/default-theme.json`；缺失的主题键会在启动时自动修复。主题更改只
 在启动时读取，因此编辑主题后请重启 Claudex。
 
+> **安全提示。** `launchCommand` 和自定义项目操作由平台 shell 执行，因此主题
+> 文件等同于可执行代码。请只使用来自可信来源的 `claudex-theme.json`。
+
 标题只有一个：`titleFormat`。颜色和加粗通过标签内联书写，而不是使用单独的
 `titleColor`、`titleBold` 等键：
 

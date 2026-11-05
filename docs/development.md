@@ -34,6 +34,7 @@ self-contained launcher.
 ```text
 src/                    launcher code, built as two static libraries
   text_util.*           trimming, wildcard matching, shell quoting
+  text_edit.*           multi-line caret helpers for the input fields
   platform.*            UTF-8 path/env helpers, executable location
   path_resolver.*       {root}/{drive}/~ expansion, wildcards, launchCommand paths
   config_types.hpp      Settings, Project, MenuTheme, ScreenTheme, ...
@@ -41,10 +42,13 @@ src/                    launcher code, built as two static libraries
   config_bootstrap.*    config path selection through configFile
   config_manager.*      loading, startup repair, theme writing, logging
   claude_finder.*       Claude executable detection and claudeExclude
+  focus_order.*         authored focus order and section navigation
+  recent_list.*         recent-project ordering and selection
   launcher.*            portable folders, child processes, launch commands
   menu_markup.*         inline <tag> markup, borders, text templates
   screens.*             block-based screen rendering from the theme JSON
   key_events.*          theme key specs to FTXUI events
+  dialog_buttons.*      clickable dialog button bar
 main.cpp                terminal UI and the event loop
 tests/                  unit tests (no external framework)
 ```
@@ -68,3 +72,10 @@ ctest --test-dir build --output-on-failure
 subset (`claudex_tests path`) or `--list` to print the test names. Tests use a
 temporary folder per case and never start the UI. Set `-DCLAUDEX_BUILD_TESTS=OFF`
 to skip building them.
+
+## Continuous integration
+
+`.github/workflows/ci.yml` builds and runs the tests on Linux, macOS, and
+Windows for every push to `main` and every pull request. Linux and macOS build
+with `-DCLAUDEX_WERROR=ON`, which turns warnings in project sources into
+errors; Windows keeps them visible without failing the build.

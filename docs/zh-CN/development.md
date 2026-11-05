@@ -34,6 +34,7 @@ cmake --build build -j 8
 ```text
 src/                    launcher code, built as two static libraries
   text_util.*           trimming, wildcard matching, shell quoting
+  text_edit.*           multi-line caret helpers for the input fields
   platform.*            UTF-8 path/env helpers, executable location
   path_resolver.*       {root}/{drive}/~ expansion, wildcards, launchCommand paths
   config_types.hpp      Settings, Project, MenuTheme, ScreenTheme, ...
@@ -41,10 +42,13 @@ src/                    launcher code, built as two static libraries
   config_bootstrap.*    config path selection through configFile
   config_manager.*      loading, startup repair, theme writing, logging
   claude_finder.*       Claude executable detection and claudeExclude
+  focus_order.*         authored focus order and section navigation
+  recent_list.*         recent-project ordering and selection
   launcher.*            portable folders, child processes, launch commands
   menu_markup.*         inline <tag> markup, borders, text templates
   screens.*             block-based screen rendering from the theme JSON
   key_events.*          theme key specs to FTXUI events
+  dialog_buttons.*      clickable dialog button bar
 main.cpp                terminal UI and the event loop
 tests/                  unit tests (no external framework)
 ```
@@ -66,3 +70,10 @@ ctest --test-dir build --output-on-failure
 （`claudex_tests path`），或使用 `--list` 打印测试名称。测试为每个用例使用
 临时文件夹，并且从不启动界面。设置 `-DCLAUDEX_BUILD_TESTS=OFF` 可跳过构建
 测试。
+
+## 持续集成
+
+`.github/workflows/ci.yml` 会在每次推送到 `main` 和每个 Pull Request 时于
+Linux、macOS 和 Windows 上构建并运行测试。Linux 与 macOS 使用
+`-DCLAUDEX_WERROR=ON`，把项目源码中的警告视为错误；Windows 保留警告但不
+使构建失败。

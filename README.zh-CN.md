@@ -23,6 +23,9 @@
 > **非官方项目。** ClaudeX 是一个独立的社区启动器，与 Anthropic 没有隶属关系，
 > 也未获得其认可或支持。“Claude”和“Claude Code”是 Anthropic 的商标。
 > ClaudeX 不捆绑 Claude Code；你需要自行安装并拥有账号才能使用。
+>
+> **请信任你的主题文件。** `launchCommand` 和自定义项目操作由平台 shell 执行，
+> 因此主题文件等同于可执行代码。请只使用来自可信来源的 `claudex-theme.json`。
 
 ![ClaudeX 演示：启动项目、退出 Claude 回到启动器、切换主题，以及把整套环境装进一个文件夹](docs/screenshots/demo.gif)
 

@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-gcc
+            os: ubuntu-latest
+            werror: 'ON'
+          - name: macos-clang
+            os: macos-latest
+            werror: 'ON'
+          - name: windows-msvc
+            os: windows-latest
+            # MSVC's /W4 analysis differs from GCC/Clang; keep warnings
+            # visible without failing the build until it has a clean record.
+            werror: 'OFF'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: >
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          -DCLAUDEX_BUILD_TESTS=ON -DCLAUDEX_WERROR=${{ matrix.werror }}
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure -C Release
