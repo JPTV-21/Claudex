@@ -1,6 +1,7 @@
 #include "config_manager.hpp"
 
 #include "config_json.hpp"
+#include "default_focus.hpp"
 #include "text_util.hpp"
 
 #include <algorithm>
@@ -159,6 +160,8 @@ bool ConfigManager::save(std::string& error) {
     document["logFile"] = settings.logFile;
     document["tabOnlySectionSwitch"] = settings.tabOnlySectionSwitch;
     document["defaultProjectName"] = settings.defaultProjectName;
+    document["defaultFocus"] =
+        defaultFocusListToJson(settings.defaultFocusTargets);
     materializeConfigDefaults(document, defaultDocument_);
 
     json projectArray = json::array();
@@ -431,6 +434,12 @@ void ConfigManager::loadSettings(const json& document) {
         // An empty value is meaningful: do not prefill the name field.
         settings.defaultProjectName =
             document["defaultProjectName"].get<std::string>();
+    }
+    if (document.contains("defaultFocus")) {
+        const json& value = document["defaultFocus"];
+        if (value.is_object() || value.is_array()) {
+            settings.defaultFocusTargets = defaultFocusListFromJson(value);
+        }
     }
 }
 

@@ -66,6 +66,17 @@ TEST_CASE("manager/defaults match the embedded resources") {
     CHECK_EQ(config.settings.logFile, defaults.logFile);
     CHECK_EQ(config.settings.defaultProjectName,
              defaults.defaultProjectName);
+    REQUIRE(config.settings.defaultFocusTargets.size() ==
+            defaults.defaultFocusTargets.size());
+    for (std::size_t i = 0;
+         i < config.settings.defaultFocusTargets.size(); ++i) {
+        CHECK_EQ(config.settings.defaultFocusTargets[i].section,
+                 defaults.defaultFocusTargets[i].section);
+        CHECK_EQ(config.settings.defaultFocusTargets[i].match,
+                 defaults.defaultFocusTargets[i].match);
+        CHECK_EQ(config.settings.defaultFocusTargets[i].item,
+                 defaults.defaultFocusTargets[i].item);
+    }
 }
 
 TEST_CASE("manager/save then load round-trips projects") {
@@ -311,7 +322,8 @@ TEST_CASE("manager/reads every setting") {
         "tempDir": "scratch",
         "logFile": "",
         "tabOnlySectionSwitch": true,
-        "defaultProjectName": "<accent>Starter</accent>"
+        "defaultProjectName": "<accent>Starter</accent>",
+        "defaultFocus": { "section": "recent", "item": 2 }
     })");
     ConfigManager config(root.path(), configPath(root));
     config.load();
@@ -325,6 +337,10 @@ TEST_CASE("manager/reads every setting") {
     CHECK_EQ(config.settings.tempDir, "scratch");
     CHECK(config.settings.tabOnlySectionSwitch);
     CHECK_EQ(config.settings.defaultProjectName, "<accent>Starter</accent>");
+    REQUIRE(config.settings.defaultFocusTargets.size() == 1);
+    CHECK_EQ(config.settings.defaultFocusTargets.front().section, "recent");
+    CHECK(config.settings.defaultFocusTargets.front().match.empty());
+    CHECK_EQ(config.settings.defaultFocusTargets.front().item, 2);
     CHECK(config.logFilePath().empty());
     CHECK(pathsEqual(config.claudeConfigDir(), root.path() / "cfg"));
     CHECK(pathsEqual(config.tempDir(), root.path() / "scratch"));
@@ -495,6 +511,133 @@ TEST_CASE("manager/defaultProjectName round-trips through save and load") {
     reloaded.load();
     CHECK_EQ(reloaded.settings.defaultProjectName,
              "<accent>Starter</accent>");
+}
+
+TEST_CASE("manager/a single defaultFocus target is saved as an object") {
+    TempDir root;
+    {
+        ConfigManager config(root.path(), configPath(root));
+        config.load();
+        config.settings.defaultFocusTargets = {{"recent", "F:/work/app", -1}};
+        std::string error;
+        REQUIRE(config.save(error));
+        CHECK(error.empty());
+    }
+
+    const json document = readJson(configPath(root));
+    CHECK(document.at("defaultFocus").is_object());
+    CHECK_EQ(document.at("defaultFocus").at("section").get<std::string>(),
+             "recent");
+    CHECK_EQ(document.at("defaultFocus").at("match").get<std::string>(),
+             "F:/work/app");
+    CHECK_EQ(document.at("defaultFocus").at("item").get<int>(), -1);
+}
+
+TEST_CASE("manager/defaultFocus targets round-trip through save and load") {
+    TempDir root;
+    {
+        ConfigManager config(root.path(), configPath(root));
+        config.load();
+        config.settings.defaultFocusTargets = {
+            {"recent", "F:/work/app", -1},
+            {"actions", "edit", 0},
+            {"path", "", 0},
+        };
+        std::string error;
+        REQUIRE(config.save(error));
+        CHECK(error.empty());
+    }
+
+    const json document = readJson(configPath(root));
+    REQUIRE(document.at("defaultFocus").is_array());
+    REQUIRE(document.at("defaultFocus").size() == 3);
+    CHECK_EQ(document.at("defaultFocus").at(0).at("section").get<std::string>(),
+             "recent");
+    CHECK_EQ(document.at("defaultFocus").at(1).at("match").get<std::string>(),
+             "edit");
+    CHECK_EQ(document.at("defaultFocus").at(2).at("section").get<std::string>(),
+             "path");
+
+    ConfigManager reloaded(root.path(), configPath(root));
+    reloaded.load();
+    REQUIRE(reloaded.settings.defaultFocusTargets.size() == 3);
+    CHECK_EQ(reloaded.settings.defaultFocusTargets[0].section, "recent");
+    CHECK_EQ(reloaded.settings.defaultFocusTargets[0].match, "F:/work/app");
+    CHECK_EQ(reloaded.settings.defaultFocusTargets[0].item, -1);
+    CHECK_EQ(reloaded.settings.defaultFocusTargets[1].section, "actions");
+    CHECK_EQ(reloaded.settings.defaultFocusTargets[1].match, "edit");
+    CHECK_EQ(reloaded.settings.defaultFocusTargets[2].section, "path");
+}
+
+TEST_CASE("manager/a defaultFocus array keeps its shape and fills missing "
+          "fields on save") {
+    TempDir root;
+    json document = embeddedDefaultConfig();
+    const json recent = {{"section", "recent"}};
+    const json actions = {{"section", "actions"}, {"match", "edit"}};
+    document["defaultFocus"] = json::array({recent, actions});
+    writeFile(configPath(root), document.dump(2));
+
+    ConfigManager config(root.path(), configPath(root));
+    config.load();
+    // An array is a valid shape, even though the shipped default is an object.
+    CHECK(config.configIssues().empty());
+    REQUIRE(config.settings.defaultFocusTargets.size() == 2);
+    CHECK_EQ(config.settings.defaultFocusTargets[0].section, "recent");
+    CHECK_EQ(config.settings.defaultFocusTargets[0].item, 0);
+    CHECK_EQ(config.settings.defaultFocusTargets[1].match, "edit");
+
+    std::string error;
+    REQUIRE(config.save(error));
+    const json saved = readJson(configPath(root));
+    REQUIRE(saved.at("defaultFocus").is_array());
+    REQUIRE(saved.at("defaultFocus").size() == 2);
+    CHECK_EQ(saved.at("defaultFocus").at(0).at("match").get<std::string>(),
+             "");
+    CHECK_EQ(saved.at("defaultFocus").at(0).at("item").get<int>(), 0);
+}
+
+TEST_CASE("manager/a defaultFocus object without optional fields is "
+          "accepted") {
+    TempDir root;
+    json document = embeddedDefaultConfig();
+    document["defaultFocus"] = {{"section", "recent"}};
+    writeFile(configPath(root), document.dump(2));
+
+    ConfigManager config(root.path(), configPath(root));
+    config.load();
+    CHECK(config.configIssues().empty());
+    REQUIRE(config.settings.defaultFocusTargets.size() == 1);
+    CHECK_EQ(config.settings.defaultFocusTargets.front().section, "recent");
+    CHECK_EQ(config.settings.defaultFocusTargets.front().item, 0);
+}
+
+TEST_CASE("manager/a missing defaultFocus is repaired to the default") {
+    TempDir root;
+    json document = embeddedDefaultConfig();
+    document.erase("defaultFocus");
+    writeFile(configPath(root), document.dump(2));
+
+    ConfigManager config(root.path(), configPath(root));
+    config.load();
+    CHECK(hasIssue(config, "defaultFocus: missing"));
+    std::string error;
+    REQUIRE(config.repair(error));
+    CHECK_EQ(readJson(configPath(root))
+                 .at("defaultFocus")
+                 .at("section")
+                 .get<std::string>(),
+             "projects");
+    CHECK_EQ(readJson(configPath(root))
+                 .at("defaultFocus")
+                 .at("match")
+                 .get<std::string>(),
+             "");
+    CHECK_EQ(readJson(configPath(root))
+                 .at("defaultFocus")
+                 .at("item")
+                 .get<int>(),
+             0);
 }
 
 TEST_CASE("manager/a missing defaultProjectName is repaired to empty") {

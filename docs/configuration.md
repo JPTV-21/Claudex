@@ -137,6 +137,11 @@ disable logging.
   "logFile": "claudex.log",
   "tabOnlySectionSwitch": false,
   "defaultProjectName": "",
+  "defaultFocus": {
+    "section": "projects",
+    "match": "",
+    "item": 0
+  },
   "projects": [
     {
       "path": "../my-project",
@@ -163,8 +168,23 @@ be listed more than once.
 | `logFile` | Launcher diagnostics log. Empty disables logging. |
 | `tabOnlySectionSwitch` | When `false` (default), Up/Down also move between main-screen sections at a list's first/last row. When `true`, only Tab/Shift+Tab switch sections. The order follows the `screens.main.blocks` layout. |
 | `defaultProjectName` | Prefilled into the optional project-name field when a project is added. Empty (the default) leaves the field blank. Only affects new projects, not edits; the value is trimmed like a typed name and may contain markup. |
+| `defaultFocus` | Default focus target. `section` accepts `projects` (also `projectList`, `project`), `recent` (also `recentList`, `recentProjects`), `quickInput` (also `quick`, `input`), `actions` (also `actionList`, `projectMenu`), `name` (also `nameInput`), and `path` (also `pathInput`). For list sections, `match` is a stable identifier defined by the section: a project's stored path or display name for `projects`/`recent` (or `add` for the "+ Add project" row), or an action id/label for `actions`. It wins over `item` and keeps pointing at the same item when the list is reordered or refreshed. When `match` is empty or does not match, `item` is a zero-based row; a negative value means the last row, and a value past the end clamps. Sections on another page (`actions`, `name`, `path`) apply the target when that page opens and leave the main-screen focus at the built-in default. `quickInput` ignores `match` and `item`; the path fields ignore both. Defaults to `{"section": "projects", "match": "", "item": 0}`. |
 | `projects[].path` | Folder to start Claude in. Relative paths start at the launcher folder and stay relative when saved. |
 | `projects[].lastUsed` | Timestamp updated when a project is launched. Drives the recent list; a newly added project stays empty until it is launched. |
+
+`defaultFocus` accepts one object or an array of objects. With an array, each
+page picks its own target: the first main-screen entry (`projects`, `recent`,
+or `quickInput`) sets the startup focus, the first `actions` entry is used
+when the project action menu opens, and the first `name`/`path` entry is used
+when the add/edit screen opens. Entries for other pages are ignored.
+
+```json
+"defaultFocus": [
+  { "section": "recent", "match": "F:/work/app" },
+  { "section": "actions", "match": "edit" },
+  { "section": "path", "match": "name" }
+]
+```
 
 ## Path templates and variables
 

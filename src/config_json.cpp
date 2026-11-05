@@ -1,5 +1,6 @@
 #include "config_json.hpp"
 
+#include "default_focus.hpp"
 #include "text_util.hpp"
 
 #include "default_config.hpp"
@@ -257,6 +258,8 @@ Settings settingsFromDefault(const json& document) {
         document.at("tabOnlySectionSwitch").get<bool>();
     settings.defaultProjectName =
         document.at("defaultProjectName").get<std::string>();
+    settings.defaultFocusTargets =
+        defaultFocusListFromJson(document.at("defaultFocus"));
     return settings;
 }
 
@@ -547,6 +550,40 @@ void collectConfigIssues(const json& defaults, const json& user,
             }
             continue;
         }
+        // defaultFocus accepts one target object or an array of targets, so
+        // the generic type check would reject a valid array.
+        if (prefix.empty() && item.key() == "defaultFocus") {
+            const auto checkTarget = [&](const json& target,
+                                         const std::string& targetPath) {
+                if (!target.is_object()) {
+                    issues.push_back(
+                        targetPath + ": wrong type (expected object)");
+                    return;
+                }
+                for (const char* field : {"section", "match"}) {
+                    if (target.contains(field) &&
+                        !target.at(field).is_string()) {
+                        issues.push_back(targetPath + "." + field +
+                                         ": wrong type (expected string)");
+                    }
+                }
+                if (target.contains("item") &&
+                    !target.at("item").is_number_integer()) {
+                    issues.push_back(targetPath +
+                                     ".item: wrong type (expected integer)");
+                }
+            };
+            if (userValue.is_array()) {
+                for (std::size_t index = 0; index < userValue.size();
+                     ++index) {
+                    checkTarget(userValue[index],
+                                path + "[" + std::to_string(index) + "]");
+                }
+            } else {
+                checkTarget(userValue, path);
+            }
+            continue;
+        }
         if (defaultValue.is_object()) {
             if (!userValue.is_object()) {
                 issues.push_back(path + ": wrong type (expected object)");
@@ -606,6 +643,33 @@ json mergeConfigDefaults(const json& defaults, const json& user) {
                 continue;
             }
             userValue = defaultValue;
+            continue;
+        }
+        // defaultFocus accepts one object or an array of objects. Fill the
+        // missing fields of each target from the shipped default.
+        if (key == "defaultFocus") {
+            const json templateTarget =
+                defaultValue.is_array()
+                    ? (defaultValue.empty() ? json::object()
+                                            : defaultValue.front())
+                    : defaultValue;
+            const json fallbackTarget =
+                templateTarget.is_object() ? templateTarget : json::object();
+            if (userValue.is_array()) {
+                json mergedArray = json::array();
+                for (const json& target : userValue) {
+                    if (target.is_object()) {
+                        mergedArray.push_back(
+                            mergeConfigDefaults(fallbackTarget, target));
+                    }
+                }
+                userValue = std::move(mergedArray);
+            } else if (userValue.is_object()) {
+                userValue =
+                    mergeConfigDefaults(fallbackTarget, userValue);
+            } else {
+                userValue = defaultValue;
+            }
             continue;
         }
         if (defaultValue.is_object()) {

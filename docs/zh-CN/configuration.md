@@ -114,6 +114,11 @@ bin/
   "logFile": "claudex.log",
   "tabOnlySectionSwitch": false,
   "defaultProjectName": "",
+  "defaultFocus": {
+    "section": "projects",
+    "match": "",
+    "item": 0
+  },
   "projects": [
     {
       "path": "../my-project",
@@ -139,8 +144,22 @@ bin/
 | `logFile` | 启动器诊断日志。为空则禁用日志。 |
 | `tabOnlySectionSwitch` | 为 `false`（默认）时，Up/Down 也会在列表首行/末行处切换主界面区域。为 `true` 时，只有 Tab/Shift+Tab 切换区域。顺序遵循 `screens.main.blocks` 布局。 |
 | `defaultProjectName` | 添加项目时预填到可选名称输入框的默认名字。为空（默认）则保持输入框空白。只影响新增项目，不影响编辑；与手动输入的名字一样会去掉首尾空白，允许 markup。 |
+| `defaultFocus` | 默认焦点目标。`section` 支持 `projects`（也可写 `projectList`、`project`）、`recent`（也可写 `recentList`、`recentProjects`）、`quickInput`（也可写 `quick`、`input`）、`actions`（也可写 `actionList`、`projectMenu`）、`name`（也可写 `nameInput`）和 `path`（也可写 `pathInput`）。对列表区域，`match` 是各区域自己定义的稳定标识：`projects`/`recent` 匹配项目的存储路径或显示名称（`projects` 中的 `add` 匹配“+ 添加项目”行），`actions` 匹配动作 id 或标签。它优先于 `item`，并且列表重新排序或刷新后仍指向同一个条目。`match` 为空或匹配不到时，`item` 作为从 0 开始的行号回退；负数表示最后一行，超出范围时取边界值。其他页面上的区域（`actions`、`name`、`path`）会在该页面打开时应用目标，不改变主界面焦点。`quickInput` 忽略 `match` 和 `item`；路径输入框忽略两者。默认值为 `{"section": "projects", "match": "", "item": 0}`。 |
 | `projects[].path` | 启动 Claude 的文件夹。相对路径从启动器文件夹开始，保存时保持相对形式。 |
 | `projects[].lastUsed` | 启动项目时更新的时间戳。用于最近列表；新添加的项目在首次启动前保持为空。 |
+
+`defaultFocus` 可以是一个对象，也可以是对象数组。使用数组时，各页面取自己的
+目标：第一个主界面条目（`projects`、`recent` 或 `quickInput`）决定启动焦点，
+第一个 `actions` 条目在打开项目动作菜单时使用，第一个 `name`/`path` 条目在
+打开添加/编辑页时使用。其他页面的条目会被忽略。
+
+```json
+"defaultFocus": [
+  { "section": "recent", "match": "F:/work/app" },
+  { "section": "actions", "match": "edit" },
+  { "section": "path", "match": "name" }
+]
+```
 
 ## 路径模板与变量 <a id="path-templates-and-variables"></a>
 

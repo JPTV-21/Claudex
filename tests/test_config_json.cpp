@@ -228,6 +228,13 @@ TEST_CASE("config/settingsFromDefault reads the embedded defaults") {
     CHECK_EQ(settings.defaultProjectName,
              document.at("defaultProjectName").get<std::string>());
     CHECK(settings.defaultProjectName.empty());
+    REQUIRE(settings.defaultFocusTargets.size() == 1);
+    CHECK_EQ(settings.defaultFocusTargets.front().section,
+             document.at("defaultFocus").at("section").get<std::string>());
+    CHECK_EQ(settings.defaultFocusTargets.front().match,
+             document.at("defaultFocus").at("match").get<std::string>());
+    CHECK_EQ(settings.defaultFocusTargets.front().item,
+             document.at("defaultFocus").at("item").get<int>());
 }
 
 TEST_CASE("config/settingsFromDefault accepts string forms") {
@@ -236,12 +243,35 @@ TEST_CASE("config/settingsFromDefault accepts string forms") {
     document["claudeExclude"] = "ClaudeX*";
     document["launchCommand"] = "{claude}";
     document["defaultProjectName"] = "<accent>Starter</accent>";
+    document["defaultFocus"] = {{"section", "recent"},
+                                {"match", "F:/work/app"},
+                                {"item", -1}};
     const Settings settings = settingsFromDefault(document);
     CHECK_EQ(settings.claudePath, std::vector<std::string>{"bin/claude"});
     CHECK_EQ(settings.claudeExclude, std::vector<std::string>{"ClaudeX*"});
     CHECK_EQ(settings.launchCommand.windows, "{claude}");
     CHECK_EQ(settings.launchCommand.posix, "{claude}");
     CHECK_EQ(settings.defaultProjectName, "<accent>Starter</accent>");
+    REQUIRE(settings.defaultFocusTargets.size() == 1);
+    CHECK_EQ(settings.defaultFocusTargets.front().section, "recent");
+    CHECK_EQ(settings.defaultFocusTargets.front().match, "F:/work/app");
+    CHECK_EQ(settings.defaultFocusTargets.front().item, -1);
+}
+
+TEST_CASE("config/settingsFromDefault accepts an array of focus targets") {
+    json document = embeddedDefaultConfig();
+    const json recent = {
+        {"section", "recent"}, {"match", "F:/work/app"}, {"item", 1}};
+    const json actions = {{"section", "actions"}, {"match", "edit"}};
+    document["defaultFocus"] = json::array({recent, actions});
+    const Settings settings = settingsFromDefault(document);
+    REQUIRE(settings.defaultFocusTargets.size() == 2);
+    CHECK_EQ(settings.defaultFocusTargets[0].section, "recent");
+    CHECK_EQ(settings.defaultFocusTargets[0].match, "F:/work/app");
+    CHECK_EQ(settings.defaultFocusTargets[0].item, 1);
+    CHECK_EQ(settings.defaultFocusTargets[1].section, "actions");
+    CHECK_EQ(settings.defaultFocusTargets[1].match, "edit");
+    CHECK_EQ(settings.defaultFocusTargets[1].item, 0);
 }
 
 TEST_CASE("config/stringListField only accepts all-string arrays") {

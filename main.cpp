@@ -2,6 +2,7 @@
 #include "config_bootstrap.hpp"
 #include "config_json.hpp"
 #include "config_manager.hpp"
+#include "default_focus.hpp"
 #include "dialog_buttons.hpp"
 #include "focus_order.hpp"
 #include "grid_menu.hpp"
@@ -612,6 +613,26 @@ int main(int argc, char** argv) {
         }
     };
 
+    // The path screen can be the configured focus target: "name" and "path"
+    // select the field the theme drew. It is applied when the screen opens,
+    // not when returning from the confirm page, so the field the user chose
+    // is kept in that round trip.
+    auto applyConfiguredPathFocus = [&]() {
+        const DefaultFocus* target =
+            pathFocusTarget(config.settings.defaultFocusTargets);
+        if (target == nullptr) {
+            return;
+        }
+        const FocusSection focusSection =
+            focusSectionFromText(target->section);
+        const int index = pathFieldIndex(
+            focusSection == FocusSection::PathName ? PathField::Name
+                                                   : PathField::Path);
+        if (index >= 0) {
+            pathFocus = index;
+        }
+    };
+
     auto beginAddProject = [&]() {
         pathMode = PathMode::Add;
         pathEditIndex = -1;
@@ -622,6 +643,7 @@ int main(int argc, char** argv) {
         pathCursor = 0;
         nameCursor = static_cast<int>(projectName.size());
         pathFocus = std::max(0, pathFieldIndex(PathField::Path));
+        applyConfiguredPathFocus();
         pathError.clear();
         pendingPath.clear();
         updatePathPlaceholder();
@@ -636,6 +658,11 @@ int main(int argc, char** argv) {
             return;
         }
         projectActionSelected = 0;
+        if (const DefaultFocus* target =
+                actionFocusTarget(config.settings.defaultFocusTargets)) {
+            projectActionSelected =
+                actionFocusIndex(config.menuTheme.actions, *target);
+        }
         switchPage(Page::ProjectActions);
     };
 
@@ -656,6 +683,7 @@ int main(int argc, char** argv) {
         pathCursor = static_cast<int>(pathInput.size());
         nameCursor = static_cast<int>(projectName.size());
         pathFocus = std::max(0, pathFieldIndex(PathField::Path));
+        applyConfiguredPathFocus();
         pathError.clear();
         pendingPath.clear();
         updatePathPlaceholder();
@@ -998,6 +1026,30 @@ int main(int argc, char** argv) {
 
     refreshMenu();
     updatePathPlaceholder();
+
+    // Apply the configured startup focus once the lists are populated. The
+    // resolver falls back to the project list when the requested section is
+    // absent, empty, or not part of the theme's layout.
+    {
+        const DefaultFocus* startupFocus =
+            mainFocusTarget(config.settings.defaultFocusTargets);
+        const FocusChoice focusChoice = resolveDefaultFocus(
+            startupFocus ? *startupFocus : DefaultFocus{}, mainFocusOrder,
+            static_cast<int>(menuEntries.size()),
+            static_cast<int>(recentMenuEntries.size()), config.projects,
+            recentProjectIndices);
+        if (focusChoice.node >= 0) {
+            const int focusIndex = focusIndexOf(focusChoice.node);
+            if (focusIndex >= 0) {
+                mainFocus = focusIndex;
+            }
+            if (focusChoice.node == kMainFocusProjects) {
+                mainSelected = focusChoice.item;
+            } else if (focusChoice.node == kMainFocusRecent) {
+                recentSelected = focusChoice.item;
+            }
+        }
+    }
 
     auto mainMenu = Menu(&menuEntries, &mainSelected, menuOptions);
 

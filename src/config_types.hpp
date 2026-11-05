@@ -26,6 +26,18 @@ struct LaunchCommand {
     }
 };
 
+// Where focus starts in a list. |section| names a focusable section; an empty
+// value keeps the built-in behavior. |match| is a stable, section-defined
+// identifier (a project path/name for the project lists, an action id/label
+// for the action menu); it survives reordering. When it is empty or does not
+// match, |item| is a zero-based row and a negative value means the last row.
+// |match| and |item| are ignored by sections without rows (quickInput).
+struct DefaultFocus {
+    std::string section;
+    std::string match;
+    int item = 0;
+};
+
 struct Settings {
     std::string themeFile;
     // Optional path of another config file to load instead of this one. An
@@ -40,6 +52,9 @@ struct Settings {
     bool tabOnlySectionSwitch = false;
     // Prefilled into the optional name field when a project is added.
     std::string defaultProjectName;
+    // One entry per focusable section. The first main-screen target wins at
+    // startup; the first action/path target wins when its page opens.
+    std::vector<DefaultFocus> defaultFocusTargets;
 };
 
 struct Project {

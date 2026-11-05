@@ -42,6 +42,7 @@ src/                    launcher code, built as two static libraries
   config_bootstrap.*    config path selection through configFile
   config_manager.*      loading, startup repair, theme writing, logging
   claude_finder.*       Claude executable detection and claudeExclude
+  default_focus.*       configured startup focus and section item matching
   focus_order.*         authored focus order and section navigation
   recent_list.*         recent-project ordering and selection
   launcher.*            portable folders, child processes, launch commands
