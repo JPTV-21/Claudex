@@ -40,6 +40,24 @@ TEST_CASE("focus_order/collects main focus targets and drops duplicates") {
     CHECK_EQ(order[2], kMainFocusRecent);
 }
 
+TEST_CASE("focus_order/collects the cwd section in authored order") {
+    const json blocks = json::parse(R"([
+        {"type": "cwdList"},
+        {"type": "hbox", "children": [
+            {"type": "projectList"},
+            {"type": "cwdList"},
+            {"type": "quickInput"}
+        ]}
+    ])");
+
+    std::vector<int> order;
+    collectMainFocusOrder(blocks, order);
+    REQUIRE(order.size() == 3);
+    CHECK_EQ(order[0], kMainFocusCwd);
+    CHECK_EQ(order[1], kMainFocusProjects);
+    CHECK_EQ(order[2], kMainFocusQuickInput);
+}
+
 TEST_CASE("focus_order/ignores malformed block lists") {
     std::vector<int> mainOrder;
     collectMainFocusOrder(json("not an array"), mainOrder);

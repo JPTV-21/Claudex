@@ -15,6 +15,7 @@ enum class FocusSection {
     Projects,
     Recent,
     QuickInput,
+    Cwd,
     Actions,
     PathName,
     PathPath,
@@ -68,24 +69,36 @@ int actionFocusIndex(const std::vector<MenuAction>& actions,
                      const DefaultFocus& focus);
 
 struct FocusChoice {
-    // kMainFocusProjects / kMainFocusRecent / kMainFocusQuickInput, or -1
-    // when the main screen has no focusable section at all.
+    // kMainFocusProjects / kMainFocusRecent / kMainFocusQuickInput /
+    // kMainFocusCwd, or -1 when the main screen has no focusable section.
     int node = -1;
     // Zero-based row chosen inside the section's list. Always 0 for the
-    // quick-input section.
+    // quick-input and cwd sections.
     int item = 0;
 };
 
 // Picks the startup focus on the main screen. |projectEntries| counts the
 // project menu rows (including the "+ Add project" row); |recentEntries|
 // counts the recent rows. A section that lives on another page (actions,
-// path fields) falls back to the project list here; that page applies the
-// selector when it opens.
+// path fields) is ignored here; that page applies the selector when it opens.
 //
-// When the requested section is absent or empty, the first available section
-// from the built-in order (projects, recent, quickInput) is used. An identity
-// match is attempted in the section that ends up focused, so a project that
-// moved from recent to the pinned list is still found.
+// |targets| is the configured priority list: the first target whose section
+// is drawn by the theme and currently available wins. Availability skips a
+// hidden cwd section, an empty project list, and an empty recent list. When
+// every configured target is unavailable, the first available section in
+// |focusOrder| (the theme's authored block order) is used. An identity match
+// from the first configured main target is attempted in that fallback
+// section, so a project that moved from recent to the pinned list is still
+// found.
+FocusChoice resolveDefaultFocus(const std::vector<DefaultFocus>& targets,
+                                const std::vector<int>& focusOrder,
+                                int projectEntries, int recentEntries,
+                                bool cwdAvailable,
+                                const std::vector<Project>& projects,
+                                const std::vector<int>& recentIndices);
+
+// Compatibility overload for one configured target. It keeps the historical
+// single-target behavior and treats the cwd section as unavailable.
 FocusChoice resolveDefaultFocus(const DefaultFocus& focus,
                                 const std::vector<int>& focusOrder,
                                 int projectEntries, int recentEntries,

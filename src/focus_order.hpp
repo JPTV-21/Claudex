@@ -11,6 +11,7 @@ namespace claudex {
 inline constexpr int kMainFocusProjects = 0;
 inline constexpr int kMainFocusRecent = 1;
 inline constexpr int kMainFocusQuickInput = 2;
+inline constexpr int kMainFocusCwd = 3;
 
 // Input fields on the path screen. The theme decides which ones exist and in
 // which order, so Up/Down and Tab follow the drawn layout.

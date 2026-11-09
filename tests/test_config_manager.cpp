@@ -580,7 +580,7 @@ TEST_CASE("manager/a defaultFocus array keeps its shape and fills missing "
 
     ConfigManager config(root.path(), configPath(root));
     config.load();
-    // An array is a valid shape, even though the shipped default is an object.
+    // An array is a valid shape; the shipped default is also an array.
     CHECK(config.configIssues().empty());
     REQUIRE(config.settings.defaultFocusTargets.size() == 2);
     CHECK_EQ(config.settings.defaultFocusTargets[0].section, "recent");
@@ -623,21 +623,17 @@ TEST_CASE("manager/a missing defaultFocus is repaired to the default") {
     CHECK(hasIssue(config, "defaultFocus: missing"));
     std::string error;
     REQUIRE(config.repair(error));
-    CHECK_EQ(readJson(configPath(root))
-                 .at("defaultFocus")
-                 .at("section")
-                 .get<std::string>(),
-             "projects");
-    CHECK_EQ(readJson(configPath(root))
-                 .at("defaultFocus")
-                 .at("match")
-                 .get<std::string>(),
-             "");
-    CHECK_EQ(readJson(configPath(root))
-                 .at("defaultFocus")
-                 .at("item")
-                 .get<int>(),
-             0);
+    const json repaired = readJson(configPath(root)).at("defaultFocus");
+    REQUIRE(repaired.is_array());
+    REQUIRE(repaired.size() == 4);
+    const std::vector<std::string> expectedSections = {
+        "cwd", "projects", "recent", "quickInput"};
+    for (std::size_t i = 0; i < expectedSections.size(); ++i) {
+        CHECK_EQ(repaired.at(i).at("section").get<std::string>(),
+                 expectedSections[i]);
+        CHECK_EQ(repaired.at(i).at("match").get<std::string>(), "");
+        CHECK_EQ(repaired.at(i).at("item").get<int>(), 0);
+    }
 }
 
 TEST_CASE("manager/a missing defaultProjectName is repaired to empty") {

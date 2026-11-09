@@ -8,7 +8,7 @@ if(MSVC)
         "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()
 
-project(ClaudeX VERSION 1.5.0 LANGUAGES CXX)
+project(ClaudeX VERSION 1.6.0 LANGUAGES CXX)
 
 set(CLAUDEX_AUTHOR "Wind_Blood")
 
@@ -130,6 +130,7 @@ add_library(claudex_core STATIC
     src/config_bootstrap.cpp
     src/config_manager.cpp
     src/claude_finder.cpp
+    src/cwd_project.cpp
     src/default_focus.cpp
     src/focus_order.cpp
     src/recent_list.cpp

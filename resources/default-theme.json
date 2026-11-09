@@ -54,6 +54,8 @@
   "recentTitleFormat": "<muted>Recent</muted>",
   "recentEntryFormat": "<path>",
   "recentEmptyText": "",
+  "cwdTitleFormat": "<muted>Current folder</muted>",
+  "cwdEntryFormat": "<bold>{path}</bold>",
   "recentLimit": 5,
   "quickInputLabel": "<muted>Quick launch:</muted>",
   "quickInputPlaceholder": "{drive}/Projects/my-project",
@@ -82,6 +84,11 @@
       "blocks": [
         { "type": "title" },
         { "type": "separator" },
+        {
+          "type": "cwdList",
+          "if": "cwd",
+          "separatorAfter": true
+        },
         {
           "type": "projectList",
           "maxHeight": "listHeight",

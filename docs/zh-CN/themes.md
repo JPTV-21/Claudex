@@ -81,6 +81,8 @@
 | `recentEntryFormat` | 最近行模板。支持 `<path>`/`{path}`、`<name>`/`{name}` 和 `<lastUsed>`/`{lastUsed}`；允许 markup。 |
 | `recentEmptyText` | `recentList` 块没有条目时显示的文本。为空则隐藏该块。 |
 | `recentLimit` | 最近行的默认最大数量；`0` 禁用列表。块的 `limit` 会覆盖它。 |
+| `cwdTitleFormat` | `cwdList` 块显示的标题。为空则隐藏标题。 |
+| `cwdEntryFormat` | 当前文件夹行模板。支持 `<path>`/`{path}`（工作目录）；允许 markup。 |
 | `quickInputLabel` | 主界面快速启动输入框前方的标签。允许 markup；为空则隐藏。 |
 | `quickInputPlaceholder` | 快速启动输入框中的占位符。路径模板会被展开；允许 markup。输入的路径始终保持字面文本。 |
 | `pathContinueLabel` / `pathCancelLabel` | 添加/编辑路径界面上的可点击按钮。允许 markup。 |
@@ -163,7 +165,8 @@
 占位符展开之后解析。
 
 Markup 适用于 `titleFormat`、`hintText`、`footerLines`、`addProjectLabel`、
-`projectEntryFormat`、`activePrefix`/`inactivePrefix`、`pathPlaceholder`、
+`projectEntryFormat`、`cwdTitleFormat`、`cwdEntryFormat`、
+`activePrefix`/`inactivePrefix`、`pathPlaceholder`、
 `projectNamePlaceholder`、`quickInputPlaceholder`、`tinyHintText`、所有
 `projectMenu` 文本字段和动作标签、主题 `messages`，以及所有渲染文本的屏幕
 块（包括 `status`、`statusOrHint` 和 `error`）。输入框中键入的文本始终按
@@ -222,6 +225,7 @@ Markup 适用于 `titleFormat`、`hintText`、`footerLines`、`addProjectLabel`�
 | `blank` | 一个空行。 |
 | `projectList` | 项目列表。`entryLines`（行模板数组，见下文）、`focusedEntryLines`（焦点行的行模板）、`entryFormat`、`activePrefix`、`inactivePrefix`、`addProject`（默认 `true`）、`inverseHighlight`（默认 `true`）、`maxHeight`（默认 `10`）、`scroll`、`scrollbar`、`frame`，以及下面的网格键。 |
 | `recentList` | 最近启动的项目，最新的在前。`entryLines`、`focusedEntryLines`、`limit`（默认 `recentLimit`）、`title`（默认 `recentTitleFormat`）、`titleAlign`（默认 `left`）、`entryFormat`（默认 `recentEntryFormat`）、`activePrefix`、`inactivePrefix`、`inverseHighlight`、`maxHeight`、`scroll`、`scrollbar`、`frame`、`emptyText`（默认 `recentEmptyText`），以及下面的网格键。没有条目时隐藏，除非设置了 `emptyText`。 |
+| `cwdList` | 把进程当前工作目录作为一个单行区域显示。`entryLines`、`focusedEntryLines`、`entryFormat`（默认 `cwdEntryFormat`）、`title`（默认 `cwdTitleFormat`）、`titleAlign`（默认 `left`）、`activePrefix`、`inactivePrefix`、`inverseHighlight`、`maxHeight`。从启动器自身目录启动时隐藏。行模板使用 `{path}`；其他块文本可以使用 `{cwd}`。`Enter` 会在该目录中一次性启动 Claude，不写入项目列表。 |
 | `quickInput` | 一次性启动的输入行。`title`（在输入框上方绘制的标题，使其像 `recentList` 一样成为独立区域）、`titleAlign`（默认使用块的 `align`）、`label`（默认 `quickInputLabel`；当标题已经表明字段用途时设为 `""`）。输入的文件夹不会加入配置。页面高度不足以同时显示两者时，标题会先收起，让输入框保持可用。 |
 | `actionList` | 项目动作列表。`inverseHighlight`（默认 `true`）、`maxHeight`、`scroll`、`scrollbar`、`frame`，以及下面的网格键。 |
 | `buttons` | 当前页面的可点击 Back/Confirm 按钮（别名 `dialogButtons`）。按钮标签来自上面的主题键。没有此块的主题会在页面末尾追加按钮。 |
@@ -234,9 +238,9 @@ Markup 适用于 `titleFormat`、`hintText`、`footerLines`、`addProjectLabel`�
 | `vbox` | 垂直子元素。 |
 | `spacer` | 可伸缩的空白空间（`filler`）。 |
 
-`projectList` 和 `recentList` 各自记住自己的选择，但只有当前拥有键盘焦点的
-区域会绘制光标（`activePrefix` 加反色高亮）。用鼠标悬停在某一行或某个区域
-上会移动该焦点。
+`projectList`、`recentList` 和 `cwdList` 各自记住自己的选择，但只有当前拥有
+键盘焦点的区域会绘制光标（`activePrefix` 加反色高亮）。用鼠标悬停在某一行
+或某个区域上会移动该焦点。
 
 列表可以通过 `entryLines`（一个行模板数组）渲染多行条目。可选的
 `focusedEntryLines` 是第二个数组，只用于当前拥有键盘焦点的行：
@@ -369,7 +373,7 @@ Left/Right 在单列列表上不做任何事，从而留给文本字段使用。
 
 `if` / `unless` 的条件：`projects`、`noProjects`、`selected`、
 `noSelection`、`status`、`noStatus`、`error`、`noError`、`addProject`、
-`noAddProject`、`recent`、`noRecent`、`quickInput`。
+`noAddProject`、`recent`、`noRecent`、`quickInput`、`cwd`、`noCwd`。
 
 所有屏幕文本都会使用常规占位符加上以下内容展开：
 
@@ -379,6 +383,7 @@ Left/Right 在单列列表上不做任何事，从而留给文本字段使用。
 | `{mode}` | 路径界面上的 `addTitle` 或 `editTitle`。 |
 | `{error}` | 当前路径错误（如果有）。 |
 | `{status}` | 当前状态消息。 |
+| `{cwd}` | 进程当前工作目录；cwd 区域隐藏时为空字符串。 |
 | `{theme}` | 主题文件路径（为空时为 `disabled`）。 |
 
 例如，一个 Claude Code 风格的主界面，带欢迎卡片且没有外边框：
@@ -462,7 +467,7 @@ Left/Right 在单列列表上不做任何事，从而留给文本字段使用。
 ```
 
 固定列宽只需 `"width": 34`；给会增长的一侧设置 `flex`（或者给两侧都设置
-`flex` 以获得等宽列）。每个交互块（`projectList`、`recentList`、
+`flex` 以获得等宽列）。每个交互块（`cwdList`、`projectList`、`recentList`、
 `quickInput`、`actionList`、`pathInput`、`buttons`）在每个屏幕中只存在一次，
 `Tab` 仍会按它们在块树中出现的顺序遍历它们。
 

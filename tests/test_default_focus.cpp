@@ -341,3 +341,72 @@ TEST_CASE("default_focus/an action selector falls back to the item") {
     CHECK_EQ(actionFocusIndex(actions, target), 0);
     CHECK_EQ(actionFocusIndex({}, target), 0);
 }
+
+TEST_CASE("default_focus/classifies the cwd section") {
+    CHECK(focusSectionFromText("cwd") == FocusSection::Cwd);
+    CHECK(focusSectionFromText("cwdList") == FocusSection::Cwd);
+    CHECK(focusSectionFromText("current-folder") == FocusSection::Cwd);
+    CHECK(focusSectionFromText("workingDirectory") == FocusSection::Cwd);
+    CHECK(focusSectionFromText("here") == FocusSection::Cwd);
+}
+
+TEST_CASE("default_focus/uses the configured priority for the main screen") {
+    const std::vector<int> order = {kMainFocusCwd, kMainFocusProjects,
+                                    kMainFocusRecent, kMainFocusQuickInput};
+    const std::vector<DefaultFocus> targets = {
+        focus("cwd", 0), focus("projects", 0), focus("recent", 0),
+        focus("quickInput", 0)};
+
+    const FocusChoice cwd =
+        resolveDefaultFocus(targets, order, 2, 1, true, {}, {});
+    CHECK_EQ(cwd.node, kMainFocusCwd);
+    CHECK_EQ(cwd.item, 0);
+
+    const FocusChoice projects =
+        resolveDefaultFocus(targets, order, 2, 1, false, {}, {});
+    CHECK_EQ(projects.node, kMainFocusProjects);
+
+    // The configured order beats the theme order.
+    const std::vector<DefaultFocus> preferRecent = {focus("cwd", 0),
+                                                   focus("recent", 1)};
+    const FocusChoice recent =
+        resolveDefaultFocus(preferRecent, order, 2, 3, false, {}, {});
+    CHECK_EQ(recent.node, kMainFocusRecent);
+    CHECK_EQ(recent.item, 1);
+}
+
+TEST_CASE("default_focus/skips a cwd target the theme does not draw") {
+    const std::vector<int> order = {kMainFocusProjects, kMainFocusQuickInput};
+    const std::vector<DefaultFocus> targets = {focus("cwd", 0)};
+    const FocusChoice choice =
+        resolveDefaultFocus(targets, order, 2, 1, true, {}, {});
+    CHECK_EQ(choice.node, kMainFocusProjects);
+}
+
+TEST_CASE("default_focus/falls back to the theme block order") {
+    const std::vector<int> order = {kMainFocusCwd, kMainFocusQuickInput,
+                                    kMainFocusProjects};
+    const std::vector<DefaultFocus> targets = {focus("cwd", 0)};
+    const FocusChoice choice =
+        resolveDefaultFocus(targets, order, 2, 0, false, {}, {});
+    CHECK_EQ(choice.node, kMainFocusQuickInput);
+}
+
+TEST_CASE("default_focus/identity fallback uses the first configured target") {
+    const std::vector<int> order = {kMainFocusProjects, kMainFocusRecent,
+                                    kMainFocusQuickInput};
+    const std::vector<DefaultFocus> targets = {projectFocus("recent", "b")};
+    const std::vector<Project> projects = {project("a"), project("b")};
+    const FocusChoice choice =
+        resolveDefaultFocus(targets, order, 2, 0, false, projects, {});
+    CHECK_EQ(choice.node, kMainFocusProjects);
+    CHECK_EQ(choice.item, 1);
+}
+
+TEST_CASE("default_focus/vector resolution returns nothing for an empty "
+          "layout") {
+    const std::vector<DefaultFocus> targets = {focus("projects", 0)};
+    const FocusChoice choice =
+        resolveDefaultFocus(targets, {}, 4, 2, false, {}, {});
+    CHECK_EQ(choice.node, -1);
+}

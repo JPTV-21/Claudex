@@ -20,12 +20,14 @@ struct BlockRenderContext {
     std::string errorText;
     std::string modeText;
     std::string statusText;
+    std::string cwdPath;
     bool statusIsError = false;
     bool showAddProject = false;
     bool hasSelection = false;
     int recentCount = 0;
     ftxui::Element projectList;
     ftxui::Element recentList;
+    ftxui::Element cwdList;
     ftxui::Element actionList;
     ftxui::Element pathInput;
     ftxui::Element projectNameInput;
@@ -33,6 +35,7 @@ struct BlockRenderContext {
     ftxui::Element dialogButtons;
     bool hasProjectList = false;
     bool hasRecentList = false;
+    bool hasCwdList = false;
     bool hasActionList = false;
     bool hasPathInput = false;
     bool hasProjectNameInput = false;

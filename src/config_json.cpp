@@ -394,6 +394,12 @@ MenuTheme menuThemeFromDocument(const json& document,
     theme.recentEmptyText = jsonStringField(
         document, "recentEmptyText",
         defaults ? defaults->recentEmptyText : std::string());
+    theme.cwdTitleFormat = jsonStringField(
+        document, "cwdTitleFormat",
+        defaults ? defaults->cwdTitleFormat : std::string());
+    theme.cwdEntryFormat = jsonStringField(
+        document, "cwdEntryFormat",
+        defaults ? defaults->cwdEntryFormat : std::string());
     theme.recentLimit = std::max(
         0, jsonIntFieldResolved(document, "recentLimit",
                                 defaults ? defaults->recentLimit : 5,

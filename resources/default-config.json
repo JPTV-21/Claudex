@@ -13,10 +13,11 @@
   "logFile": "claudex.log",
   "tabOnlySectionSwitch": false,
   "defaultProjectName": "",
-  "defaultFocus": {
-    "section": "projects",
-    "match": "",
-    "item": 0
-  },
+  "defaultFocus": [
+    { "section": "cwd", "match": "", "item": 0 },
+    { "section": "projects", "match": "", "item": 0 },
+    { "section": "recent", "match": "", "item": 0 },
+    { "section": "quickInput", "match": "", "item": 0 }
+  ],
   "projects": []
 }

@@ -228,13 +228,22 @@ TEST_CASE("config/settingsFromDefault reads the embedded defaults") {
     CHECK_EQ(settings.defaultProjectName,
              document.at("defaultProjectName").get<std::string>());
     CHECK(settings.defaultProjectName.empty());
-    REQUIRE(settings.defaultFocusTargets.size() == 1);
-    CHECK_EQ(settings.defaultFocusTargets.front().section,
-             document.at("defaultFocus").at("section").get<std::string>());
-    CHECK_EQ(settings.defaultFocusTargets.front().match,
-             document.at("defaultFocus").at("match").get<std::string>());
-    CHECK_EQ(settings.defaultFocusTargets.front().item,
-             document.at("defaultFocus").at("item").get<int>());
+    const json& focusDefaults = document.at("defaultFocus");
+    REQUIRE(focusDefaults.is_array());
+    REQUIRE(settings.defaultFocusTargets.size() == focusDefaults.size());
+    REQUIRE(settings.defaultFocusTargets.size() == 4);
+    const std::vector<std::string> expectedSections = {
+        "cwd", "projects", "recent", "quickInput"};
+    for (std::size_t i = 0; i < settings.defaultFocusTargets.size(); ++i) {
+        CHECK_EQ(settings.defaultFocusTargets[i].section,
+                 expectedSections[i]);
+        CHECK_EQ(settings.defaultFocusTargets[i].section,
+                 focusDefaults.at(i).at("section").get<std::string>());
+        CHECK_EQ(settings.defaultFocusTargets[i].match,
+                 focusDefaults.at(i).at("match").get<std::string>());
+        CHECK_EQ(settings.defaultFocusTargets[i].item,
+                 focusDefaults.at(i).at("item").get<int>());
+    }
 }
 
 TEST_CASE("config/settingsFromDefault accepts string forms") {
@@ -303,6 +312,8 @@ TEST_CASE("config/menuThemeFromDocument parses the embedded default theme") {
     CHECK(theme.screens.count("main") == 1);
     CHECK_FALSE(theme.actions.empty());
     CHECK_FALSE(theme.keys.quit.empty());
+    CHECK_FALSE(theme.cwdTitleFormat.empty());
+    CHECK_FALSE(theme.cwdEntryFormat.empty());
     CHECK(theme.recentLimit >= 0);
     // Every message the code asks for by key must be defined.
     for (const char* key : {"configParseFailed", "themeCreated",
@@ -317,11 +328,15 @@ TEST_CASE("config/menuThemeFromDocument keeps defaults for missing optional keys
     json document = embeddedDefaultTheme();
     document.erase("recentTitleFormat");
     document.erase("recentLimit");
+    document.erase("cwdTitleFormat");
+    document.erase("cwdEntryFormat");
     document["colors"] = json{{"Brand", "#ff0000"}};
 
     const MenuTheme theme = menuThemeFromDocument(document, &defaults);
     CHECK_EQ(theme.recentTitleFormat, defaults.recentTitleFormat);
     CHECK_EQ(theme.recentLimit, defaults.recentLimit);
+    CHECK_EQ(theme.cwdTitleFormat, defaults.cwdTitleFormat);
+    CHECK_EQ(theme.cwdEntryFormat, defaults.cwdEntryFormat);
     CHECK_EQ(theme.variables.at("brand"), "#ff0000");
 }
 
@@ -724,4 +739,26 @@ TEST_CASE("config/materializeLaunchCommand handles every shape") {
     json wrongType = {{"launchCommand", 5}};
     materializeLaunchCommand(wrongType, defaults);
     CHECK_EQ(wrongType.at("launchCommand"), defaults.at("launchCommand"));
+}
+
+TEST_CASE("config/default theme places the cwd section above the project "
+          "list") {
+    const json blocks =
+        embeddedDefaultTheme().at("screens").at("main").at("blocks");
+    REQUIRE(blocks.is_array());
+
+    int cwdIndex = -1;
+    int projectIndex = -1;
+    for (int i = 0; i < static_cast<int>(blocks.size()); ++i) {
+        const std::string type = blocks.at(i).value("type", "");
+        if (type == "cwdList") {
+            cwdIndex = i;
+        } else if (type == "projectList") {
+            projectIndex = i;
+        }
+    }
+    REQUIRE(cwdIndex >= 0);
+    REQUIRE(projectIndex >= 0);
+    CHECK(cwdIndex < projectIndex);
+    CHECK_EQ(blocks.at(cwdIndex).value("if", ""), "cwd");
 }

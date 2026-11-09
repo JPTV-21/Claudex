@@ -26,6 +26,13 @@ Recent
 
 - `Enter` 在高亮的项目中启动 Claude。只有获得焦点的区域会显示 `>` 光标和反色
   高亮；其他区域保留自己的选择，但使用非活动前缀绘制。
+- 当启动器从自身目录以外的文件夹启动时（例如
+  `cd ~/workspace && ~/Claudex`），主界面会在项目列表上方显示
+  `Current folder` 区域。若从启动器自己的目录启动，该区域完全隐藏。
+  `Enter` 会在该文件夹中一次性启动 Claude，不会加入项目列表；如果该文件夹
+  已经在项目列表中，则按普通项目启动并更新其最近使用时间。区域的位置、标题
+  和行格式来自主题的 [`cwdList`](themes.md#custom-screens-full-layout-control)
+  块。
 - `+ Add project` 始终是最后一行，可以用方向键到达。
 - 添加/编辑界面有两个字段：可选的显示名称和文件夹路径。方向键会移动到主题
   实际绘制在该方向的输入框；`Up`/`Down` 会先在多行值中逐行移动。
@@ -50,6 +57,7 @@ Recent
 | `Up` / `Down` | 在当前区域内移动；到达首行/末行时移到相邻区域 |
 | `Left` / `Right` | 在网格行内移动；在单列列表中切换区域。在快速启动和路径界面输入框中，它们移动文本光标，只有到达边缘时才移动到该方向绘制的输入框/区域 |
 | `Enter`（快速启动） | 在输入的文件夹中启动一次 Claude |
+| `Enter`（当前文件夹） | 在进程的当前工作目录中启动一次 Claude |
 | `Esc`（快速启动） | 离开输入框而不退出 |
 | `E` 或 `F2` | 打开所选项目的动作菜单 |
 | `Delete` | 移除所选项目（会先询问） |
@@ -67,7 +75,7 @@ Recent
 | --- | --- |
 | 悬停在行或按钮上 | 应用悬停高亮 |
 | 悬停在主界面某一行上 | 把焦点和活动光标移到该行 |
-| 左键单击一行 | 激活该行，等同于 `Enter` |
+| 左键单击一行 | 激活该行，等同于 `Enter`（`Current folder` 行会在该文件夹中启动 Claude） |
 | 左键单击按钮 | 执行该按钮的动作（`Continue`、`Cancel`、`Create`、`Back`、`Remove`） |
 | 右键单击项目行 | 打开该项目的动作菜单 |
 | 滚轮 | 聚焦指针下的区域并移动其选择 |
@@ -77,11 +85,14 @@ Recent
 点击。键盘快捷键（`Enter`、`Esc`、`Y`、`N`）在所有界面都继续有效。
 
 区域按其在 `screens.main.blocks` 中出现的顺序从上到下遍历，因此调整
-`projectList`、`quickInput` 和 `recentList` 块的位置也会改变 Up/Down 和 Tab
-的顺序。在配置中把 `tabOnlySectionSwitch` 设为 `true`，可阻止 Up/Down 在列表
-首行/末行离开列表；`Tab` 和 `Shift+Tab` 仍会切换区域。默认值为 `false` 时，
-单行快速启动输入框中的 `Up`/`Down` 会直接切换区域，而在项目列表或最近列表
-边缘会移到相邻区域。
+`cwdList`、`projectList`、`quickInput` 和 `recentList` 块的位置也会改变
+Up/Down 和 Tab 的顺序。在配置中把 `tabOnlySectionSwitch` 设为 `true`，可阻止
+Up/Down 在列表首行/末行离开列表；`Tab` 和 `Shift+Tab` 仍会切换区域。默认值为
+`false` 时，单行快速启动输入框中的 `Up`/`Down` 会直接切换区域，而在项目列表
+或最近列表边缘会移到相邻区域。
+
+启动焦点遵循 [`defaultFocus`](configuration.md#配置字段) 数组的顺序：主题实际
+绘制且当前有内容可聚焦的第一个主界面区域获胜；隐藏或为空的区域会被跳过。
 
 项目动作菜单默认包含 `Launch Claude`、`Edit path`、`Move up`、`Move down`、
 `Move to top`、`Move to bottom`、`Remove from list` 和 `Back`；可以用

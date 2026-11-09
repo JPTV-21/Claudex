@@ -27,6 +27,14 @@ Recent
 - `Enter` launches Claude in the highlighted project. Only the focused section
   shows the `>` cursor and the inverse highlight; the other sections keep their
   selection but draw it with the inactive prefix.
+- When the launcher starts from a folder other than its own (for example
+  `cd ~/workspace && ~/Claudex`), the main screen shows a `Current folder`
+  section above the project list. It is hidden when you start the launcher from
+  its own folder. `Enter` launches Claude in that folder once without adding it
+  to the project list; if the folder is already listed, it launches the listed
+  project and updates its last-used time. The section's position, title, and
+  row format come from the theme's [`cwdList`](themes.md#custom-screens-full-layout-control)
+  block.
 - `+ Add project` is always the last row and can be reached with the arrow keys.
 - The add/edit screen has two fields: the optional project name and the folder
   path. Arrow keys move to the input the theme actually draws in that
@@ -55,6 +63,7 @@ Other keys:
 | `Up` / `Down` | Move inside the focused section; at its first/last row, move to the adjacent section |
 | `Left` / `Right` | Move within a grid row; on a single-column list they change sections. In the quick-launch and path-screen inputs they move the text cursor, and only at its edges do they move to the input/section drawn in that direction |
 | `Enter` (quick launch) | Launch Claude once in the typed folder |
+| `Enter` (current folder) | Launch Claude once in the process working directory |
 | `Esc` (quick launch) | Leave the input without quitting |
 | `E` or `F2` | Open the selected project's action menu |
 | `Delete` | Remove the selected project (asks first) |
@@ -73,7 +82,7 @@ Mouse (every screen):
 | --- | --- |
 | Hover a row or button | Apply the hover highlight |
 | Hover a main-screen row | Move the focus and the active cursor to that row |
-| Left click a row | Activate the row, like `Enter` |
+| Left click a row | Activate the row, like `Enter` (the `Current folder` row starts Claude in that folder) |
 | Left click a button | Run that button's action (`Continue`, `Cancel`, `Create`, `Back`, `Remove`) |
 | Right click a project row | Open that project's action menu |
 | Wheel | Focus the section under the pointer and move its selection |
@@ -84,13 +93,18 @@ buttons, and the project action menu (`E`) supports hover and click. The
 keyboard shortcuts (`Enter`, `Esc`, `Y`, `N`) keep working everywhere.
 
 Sections are traversed top to bottom in the order their blocks appear in
-`screens.main.blocks`, so moving the `projectList`, `quickInput`, and
-`recentList` blocks also changes the Up/Down and Tab order. Set
+`screens.main.blocks`, so moving the `cwdList`, `projectList`, `quickInput`,
+and `recentList` blocks also changes the Up/Down and Tab order. Set
 `tabOnlySectionSwitch` to `true` in the config to stop Up/Down from leaving a
 list at its first/last row; `Tab` and `Shift+Tab` still switch sections. With
 the default `false`, `Up`/`Down` in the single-line quick-launch field switch
 sections directly, and at the edges of the project or recent list they move to
 the adjacent section.
+
+The startup focus follows the order of
+[`defaultFocus`](configuration.md#config-fields) entries: the first main-screen
+section that the theme draws and that has something to focus wins; hidden or
+empty sections are skipped.
 
 The project action menu defaults to `Launch Claude`, `Edit path`, `Move up`,
 `Move down`, `Move to top`, `Move to bottom`, `Remove from list`, and `Back`;

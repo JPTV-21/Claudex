@@ -104,7 +104,8 @@ std::map<std::string, std::string> blockPlaceholders(
             {"name", context.projectName},
             {"error", context.errorText},
             {"mode", context.modeText},
-            {"status", context.statusText}};
+            {"status", context.statusText},
+            {"cwd", context.cwdPath}};
 }
 
 std::string expandBlockText(const std::string& text,
@@ -215,6 +216,12 @@ bool blockConditionSatisfied(const json& block,
         }
         if (token == "quickinput") {
             return context.hasQuickInput;
+        }
+        if (token == "cwd" || token == "cwdlist" || token == "currentfolder") {
+            return context.hasCwdList;
+        }
+        if (token == "nocwd" || token == "nocwdlist") {
+            return !context.hasCwdList;
         }
         // Unknown conditions are ignored rather than hiding content.
         return true;
@@ -381,6 +388,18 @@ void renderBlockElements(const json& block,
             produced.push_back(alignMenuLine(
                 renderThemeText(theme, part, textWidth), footerAlign));
         }
+    } else if (type == "cwdlist") {
+        if (context.hasCwdList && context.cwdList) {
+            const std::string titleText =
+                jsonStringField(block, "title", theme.cwdTitleFormat);
+            if (!trim(titleText).empty()) {
+                appendRenderedText(
+                    titleText,
+                    jsonStringField(block, "titleAlign", "left"), context,
+                    produced, textWidth, textLines);
+            }
+            produced.push_back(context.cwdList);
+        }
     } else if (type == "projectlist") {
         if (context.hasProjectList && context.projectList) {
             produced.push_back(context.projectList);
@@ -506,7 +525,8 @@ void renderBlockElements(const json& block,
     const bool layoutAlign =
         type == "box" || type == "hbox" || type == "vbox" ||
         type == "projectlist" || type == "recentlist" ||
-        type == "actionlist" || type == "pathinput" ||
+        type == "cwdlist" || type == "actionlist" ||
+        type == "pathinput" ||
         type == "nameinput" || type == "quickinput" || type == "spacer" ||
         type == "buttons" || type == "dialogbuttons";
 

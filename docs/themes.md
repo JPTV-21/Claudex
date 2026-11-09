@@ -84,6 +84,8 @@ with tags instead of separate `titleColor`, `titleBold`, etc. keys:
 | `recentEntryFormat` | Recent row template. Supports `<path>`/`{path}`, `<name>`/`{name}` and `<lastUsed>`/`{lastUsed}`; markup is allowed. |
 | `recentEmptyText` | Text shown when a `recentList` block has no entries. Empty hides the block. |
 | `recentLimit` | Default maximum number of recent rows; `0` disables the list. A block's `limit` overrides it. |
+| `cwdTitleFormat` | Heading shown by a `cwdList` block. Empty hides the heading. |
+| `cwdEntryFormat` | Current-folder row template. Supports `<path>`/`{path}` (the working directory); markup is allowed. |
 | `quickInputLabel` | Label in front of the main-screen quick-launch input. Markup is allowed; empty hides it. |
 | `quickInputPlaceholder` | Placeholder in the quick-launch input. Path templates are expanded; markup is allowed. Typed paths stay literal. |
 | `pathContinueLabel` / `pathCancelLabel` | Clickable buttons on the add/edit path screen. Markup is allowed. |
@@ -174,7 +176,8 @@ Markup is parsed after placeholders such as `<root>` and `<project>` are
 expanded.
 
 Markup applies to `titleFormat`, `hintText`, `footerLines`, `addProjectLabel`,
-`projectEntryFormat`, `activePrefix`/`inactivePrefix`, `pathPlaceholder`,
+`projectEntryFormat`, `cwdTitleFormat`, `cwdEntryFormat`,
+`activePrefix`/`inactivePrefix`, `pathPlaceholder`,
 `projectNamePlaceholder`, `quickInputPlaceholder`, `tinyHintText`, all
 `projectMenu` text fields and action labels, theme `messages`, and every screen
 block that renders text (including `status`, `statusOrHint`, and `error`). Text
@@ -235,6 +238,7 @@ Blocks:
 | `blank` | One empty row. |
 | `projectList` | Project list. `entryLines` (array of line templates, see below), `focusedEntryLines` (templates for the focused row), `entryFormat`, `activePrefix`, `inactivePrefix`, `addProject` (default `true`), `inverseHighlight` (default `true`), `maxHeight` (default `10`), `scroll`, `scrollbar`, `frame`, plus the grid keys below. |
 | `recentList` | Recently launched projects, newest first. `entryLines`, `focusedEntryLines`, `limit` (default `recentLimit`), `title` (default `recentTitleFormat`), `titleAlign` (default `left`), `entryFormat` (default `recentEntryFormat`), `activePrefix`, `inactivePrefix`, `inverseHighlight`, `maxHeight`, `scroll`, `scrollbar`, `frame`, `emptyText` (default `recentEmptyText`), plus the grid keys below. Hidden while there are no entries unless `emptyText` is set. |
+| `cwdList` | The process working directory as a one-row section. `entryLines`, `focusedEntryLines`, `entryFormat` (default `cwdEntryFormat`), `title` (default `cwdTitleFormat`), `titleAlign` (default `left`), `activePrefix`, `inactivePrefix`, `inverseHighlight`, `maxHeight`. Hidden when the launcher starts from its own folder. Row templates use `{path}`; other block text can use `{cwd}`. `Enter` launches Claude there once without writing the project list. |
 | `quickInput` | Input row for a one-time launch. `title` (heading drawn above the input, which makes it a section like `recentList`), `titleAlign` (default the block `align`), `label` (default `quickInputLabel`; set to `""` when the title already names the field). The typed folder is not added to the config. When the page is too short to show both, the title collapses first so the input stays usable. |
 | `actionList` | Project action list. `inverseHighlight` (default `true`), `maxHeight`, `scroll`, `scrollbar`, `frame`, plus the grid keys below. |
 | `buttons` | Clickable Back/Confirm buttons for the current page (alias `dialogButtons`). The button labels come from the theme keys above. Themes without this block get the buttons appended at the end of the page. |
@@ -247,9 +251,10 @@ Blocks:
 | `vbox` | Vertical children. |
 | `spacer` | Flexible empty space (`filler`). |
 
-`projectList` and `recentList` each remember a selection, but only the section
-that currently has keyboard focus draws its cursor (`activePrefix` plus the
-inverse highlight). Hovering a row or a section with the mouse moves that focus.
+`projectList`, `recentList`, and `cwdList` each remember a selection, but only
+the section that currently has keyboard focus draws its cursor (`activePrefix`
+plus the inverse highlight). Hovering a row or a section with the mouse moves
+that focus.
 
 Lists can render multi-line entries with `entryLines`, an array of line
 templates. `focusedEntryLines` is an optional second array used only for the
@@ -397,7 +402,7 @@ content is empty.
 
 Conditions for `if` / `unless`: `projects`, `noProjects`, `selected`,
 `noSelection`, `status`, `noStatus`, `error`, `noError`, `addProject`,
-`noAddProject`, `recent`, `noRecent`, `quickInput`.
+`noAddProject`, `recent`, `noRecent`, `quickInput`, `cwd`, `noCwd`.
 
 All screen text is expanded with the usual placeholders plus:
 
@@ -407,6 +412,7 @@ All screen text is expanded with the usual placeholders plus:
 | `{mode}` | `addTitle` or `editTitle` on the path screen. |
 | `{error}` | Current path error, if any. |
 | `{status}` | Current status message. |
+| `{cwd}` | Process working directory, or an empty string when the cwd section is hidden. |
 | `{theme}` | Theme file path (`disabled` when empty). |
 
 For example, a Claude Code style main screen with a welcome card and no

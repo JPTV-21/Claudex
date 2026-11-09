@@ -2,6 +2,7 @@
 #include "config_bootstrap.hpp"
 #include "config_json.hpp"
 #include "config_manager.hpp"
+#include "cwd_project.hpp"
 #include "default_focus.hpp"
 #include "dialog_buttons.hpp"
 #include "focus_order.hpp"
@@ -167,6 +168,22 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    // The process cwd is offered as a one-off project only when it is a real
+    // folder different from the launcher folder. Detection never fails the
+    // launch; an unreadable cwd simply hides the section.
+    const CwdProjectInfo cwdProject = detectCwdProject(executableDir);
+    const bool cwdVisible = cwdProject.visible();
+    const std::string cwdPathText =
+        cwdVisible ? pathToUtf8(cwdProject.path) : std::string();
+    if (cwdProject.status == CwdProjectStatus::Unavailable &&
+        !cwdProject.detail.empty()) {
+        config.log("WARN", "cwd section hidden: " + cwdProject.detail);
+    } else if (cwdVisible) {
+        config.log("INFO", "cwd section: " + cwdPathText);
+    } else {
+        config.log("INFO", "cwd section hidden: " + cwdProject.detail);
+    }
+
     auto screen = ScreenInteractive::TerminalOutput();
     enum class Page {
         Main = 0,
@@ -212,10 +229,17 @@ int main(int argc, char** argv) {
     Box projectListBox = kEmptyHitBox;
     Box recentListBox = kEmptyHitBox;
     Box quickInputBox = kEmptyHitBox;
+    Box cwdListBox = kEmptyHitBox;
+    Box cwdRowBox = kEmptyHitBox;
     // Path screen input boxes, refreshed on every draw so focus movement uses
     // the positions the theme actually produced.
     Box nameFieldBox = kEmptyHitBox;
     Box pathFieldBox = kEmptyHitBox;
+    std::vector<std::string> cwdMenuEntries;
+    int cwdSelected = 0;
+    if (cwdVisible) {
+        cwdMenuEntries.push_back(cwdPathText);
+    }
     std::string quickInput;
     int quickInputCursor = 0;
     fs::path pendingLaunchPath;
@@ -358,6 +382,21 @@ int main(int argc, char** argv) {
             ? stringListField(*recentListBlock, "focusedEntryLines", {})
             : std::vector<std::string>{};
 
+    const json* cwdListBlock =
+        findBlockByType(screenBlocks("main"), "cwdList");
+    const std::string cwdEntryFormat =
+        cwdListBlock ? jsonStringField(*cwdListBlock, "entryFormat",
+                                       config.menuTheme.cwdEntryFormat)
+                     : config.menuTheme.cwdEntryFormat;
+    const std::vector<std::string> cwdEntryLines =
+        cwdListBlock != nullptr
+            ? stringListField(*cwdListBlock, "entryLines", {})
+            : std::vector<std::string>{};
+    const std::vector<std::string> cwdFocusedEntryLines =
+        cwdListBlock != nullptr
+            ? stringListField(*cwdListBlock, "focusedEntryLines", {})
+            : std::vector<std::string>{};
+
     // projectNameDisplay controls where the optional name line appears.
     // Passing an empty name makes the name placeholders expand as unnamed,
     // just like a project that has no name of its own.
@@ -394,6 +433,28 @@ int main(int argc, char** argv) {
             focusedRow, recentNamesShown ? project.name : std::string(),
             project.path, project.lastUsed, &config.menuTheme.variables);
     };
+
+    auto cwdLinesFor = [&](bool focusedRow) -> std::vector<std::string> {
+        if (!cwdVisible) {
+            return {};
+        }
+        return entryLinesFor(cwdFocusedEntryLines, cwdEntryLines,
+                             cwdEntryFormat, focusedRow, std::string(),
+                             cwdPathText, std::string(),
+                             &config.menuTheme.variables);
+    };
+
+    const std::string cwdActivePrefix =
+        cwdListBlock ? jsonStringField(*cwdListBlock, "activePrefix",
+                                       config.menuTheme.activePrefix)
+                     : config.menuTheme.activePrefix;
+    const std::string cwdInactivePrefix =
+        cwdListBlock ? jsonStringField(*cwdListBlock, "inactivePrefix",
+                                       config.menuTheme.inactivePrefix)
+                     : config.menuTheme.inactivePrefix;
+    const bool cwdInverseHighlight =
+        cwdListBlock ? jsonBoolField(*cwdListBlock, "inverseHighlight", true)
+                     : true;
 
     const std::string recentActivePrefix =
         recentListBlock
@@ -855,6 +916,28 @@ int main(int argc, char** argv) {
 
     auto requestLaunch = [&]() { requestLaunchIndex(mainSelected); };
 
+    // One-off launch used by quick launch and the cwd section. An already
+    // listed folder counts as a normal launch so lastUsed is refreshed.
+    auto requestOneOffLaunch = [&](const fs::path& path) {
+        const int existing = config.findProject(path);
+        if (existing >= 0) {
+            requestLaunchIndex(existing);
+            return;
+        }
+        pendingLaunchIndex = -1;
+        pendingLaunchPath = path;
+        pendingCommand.clear();
+        launchRequested = true;
+        switchPage(Page::Main);
+        screen.Exit();
+    };
+
+    auto requestCwdLaunch = [&]() {
+        if (cwdVisible) {
+            requestOneOffLaunch(cwdProject.path);
+        }
+    };
+
     // Quick launch validates the typed folder but never writes it to the
     // project list. When the folder is already listed, this counts as a normal
     // launch so its lastUsed timestamp is refreshed.
@@ -927,18 +1010,7 @@ int main(int argc, char** argv) {
 
         quickInput.clear();
         quickInputCursor = 0;
-        const int existing = config.findProject(absolute);
-        if (existing >= 0) {
-            requestLaunchIndex(existing);
-            return;
-        }
-
-        pendingLaunchIndex = -1;
-        pendingLaunchPath = absolute;
-        pendingCommand.clear();
-        launchRequested = true;
-        switchPage(Page::Main);
-        screen.Exit();
+        requestOneOffLaunch(absolute);
     };
 
     auto beginRemove = [&]() {
@@ -1027,17 +1099,28 @@ int main(int argc, char** argv) {
     refreshMenu();
     updatePathPlaceholder();
 
-    // Apply the configured startup focus once the lists are populated. The
-    // resolver falls back to the project list when the requested section is
-    // absent, empty, or not part of the theme's layout.
+    // A section is usable when the theme authored it and it currently has
+    // something to focus. The cwd section is hidden when the process started
+    // from the launcher folder itself.
+    auto sectionAvailable = [&](int node) {
+        if (node == kMainFocusCwd) {
+            return cwdVisible;
+        }
+        if (node == kMainFocusRecent) {
+            return !recentMenuEntries.empty();
+        }
+        return true;
+    };
+
+    // Apply the configured startup focus once the lists are populated.
+    // defaultFocus is a priority list: the first available main-screen target
+    // wins, and the theme's authored block order is the fallback.
     {
-        const DefaultFocus* startupFocus =
-            mainFocusTarget(config.settings.defaultFocusTargets);
         const FocusChoice focusChoice = resolveDefaultFocus(
-            startupFocus ? *startupFocus : DefaultFocus{}, mainFocusOrder,
+            config.settings.defaultFocusTargets, mainFocusOrder,
             static_cast<int>(menuEntries.size()),
-            static_cast<int>(recentMenuEntries.size()), config.projects,
-            recentProjectIndices);
+            static_cast<int>(recentMenuEntries.size()), cwdVisible,
+            config.projects, recentProjectIndices);
         if (focusChoice.node >= 0) {
             const int focusIndex = focusIndexOf(focusChoice.node);
             if (focusIndex >= 0) {
@@ -1155,6 +1238,23 @@ int main(int argc, char** argv) {
     const Component recentListComponent =
         recentGrid ? Component(recentGrid) : Component(recentMenu);
 
+    // The cwd section is a one-row list. It stays in the component tree even
+    // when hidden so the mainFocus index continues to match mainFocusOrder;
+    // an empty menu is not focusable, and sectionAvailable masks it.
+    MenuOption cwdMenuOptions = MenuOption::Vertical();
+    cwdMenuOptions.entries_option.transform = [&](const EntryState& state) {
+        const bool focusedRow = state.active && focusIs(kMainFocusCwd);
+        Element element = styleMenuEntryLines(
+            state, cwdLinesFor(focusedRow), true, focusIs(kMainFocusCwd),
+            cwdActivePrefix, cwdInactivePrefix, cwdInverseHighlight,
+            &config.menuTheme.variables);
+        element |= reflect(cwdRowBox);
+        return element;
+    };
+    cwdMenuOptions.on_enter = [&]() { requestCwdLaunch(); };
+    auto cwdMenu = Menu(&cwdMenuEntries, &cwdSelected, cwdMenuOptions);
+    const Component cwdListComponent = cwdMenu;
+
     MenuOption actionMenuOptions = MenuOption::Vertical();
     actionMenuOptions.entries_option.transform = [&](const EntryState& state) {
         Element element =
@@ -1245,6 +1345,8 @@ int main(int argc, char** argv) {
             mainChildren.push_back(recentListComponent);
         } else if (node == kMainFocusQuickInput) {
             mainChildren.push_back(quickInputComponent);
+        } else if (node == kMainFocusCwd) {
+            mainChildren.push_back(cwdListComponent);
         }
     }
     if (mainChildren.empty()) {
@@ -1315,6 +1417,17 @@ int main(int argc, char** argv) {
             // The section is hidden; make sure its old hit box cannot keep
             // receiving mouse events.
             recentListBox = kEmptyHitBox;
+        }
+
+        context.cwdPath = cwdPathText;
+        if (cwdVisible) {
+            context.cwdList =
+                cwdListComponent->Render() | reflect(cwdListBox);
+            context.hasCwdList = true;
+        } else {
+            context.hasCwdList = false;
+            cwdListBox = kEmptyHitBox;
+            cwdRowBox = kEmptyHitBox;
         }
 
         context.quickInput =
@@ -1433,16 +1546,13 @@ int main(int argc, char** argv) {
 
     // Tab is handled before the page components so a Menu cannot swallow it
     // and keep focus inside the project list. The order is the authored block
-    // order, with an empty recent list skipped because its Menu is not
+    // order, with unavailable sections skipped because their Menus are not
     // focusable.
     auto moveMainFocus = [&](int step, bool wrap) {
         std::vector<bool> enabled(mainFocusOrder.size(), true);
         for (int i = 0; i < static_cast<int>(mainFocusOrder.size()); ++i) {
-            if (mainFocusOrder[static_cast<std::size_t>(i)] ==
-                    kMainFocusRecent &&
-                recentMenuEntries.empty()) {
-                enabled[static_cast<std::size_t>(i)] = false;
-            }
+            enabled[static_cast<std::size_t>(i)] =
+                sectionAvailable(mainFocusOrder[static_cast<std::size_t>(i)]);
         }
         const int next = moveEnabledIndex(enabled, mainFocus, step, wrap);
         if (next >= 0) {
@@ -1464,11 +1574,10 @@ int main(int argc, char** argv) {
         if (node == kMainFocusQuickInput) {
             return quickInputBox;
         }
+        if (node == kMainFocusCwd) {
+            return cwdListBox;
+        }
         return kEmptyHitBox;
-    };
-
-    auto sectionAvailable = [&](int node) {
-        return !(node == kMainFocusRecent && recentMenuEntries.empty());
     };
 
     auto spatialNeighbor = [&](NavDir direction) -> int {
@@ -1522,6 +1631,8 @@ int main(int argc, char** argv) {
         const bool overProjectList = mouseInside(projectListBox, mouse);
         const bool overRecentList = mouseInside(recentListBox, mouse);
         const bool overQuickInput = mouseInside(quickInputBox, mouse);
+        const bool overCwdList = mouseInside(cwdListBox, mouse);
+        const bool overCwdRow = mouseInside(cwdRowBox, mouse);
 
         // A grid owns its own cells: hovering must be able to focus it before
         // it has the keyboard focus, which the component tree cannot do.
@@ -1544,6 +1655,11 @@ int main(int argc, char** argv) {
                 focusProjects();
             }
         };
+        auto focusCwd = [&]() {
+            if (!setFocusNode(kMainFocusCwd)) {
+                focusProjects();
+            }
+        };
 
         if (mouse.button == Mouse::WheelUp ||
             mouse.button == Mouse::WheelDown) {
@@ -1559,12 +1675,21 @@ int main(int argc, char** argv) {
                 clearProjectStatus();
                 return false;
             }
+            if (overCwdRow) {
+                focusCwd();
+                clearProjectStatus();
+                return true;
+            }
             if (overProjectList) {
                 focusProjects();
                 return true;
             }
             if (overRecentList && !recentMenuEntries.empty()) {
                 focusRecent();
+                return true;
+            }
+            if (overCwdList) {
+                focusCwd();
                 return true;
             }
             return false;
@@ -1587,6 +1712,11 @@ int main(int argc, char** argv) {
                 }
                 return true;
             }
+            if (overCwdRow) {
+                focusCwd();
+                clearProjectStatus();
+                return true;
+            }
             if (overQuickInput) {
                 if (!setFocusNode(kMainFocusQuickInput)) {
                     focusProjects();
@@ -1599,6 +1729,10 @@ int main(int argc, char** argv) {
             }
             if (overRecentList && !recentMenuEntries.empty()) {
                 focusRecent();
+                return true;
+            }
+            if (overCwdList) {
+                focusCwd();
                 return true;
             }
             return false;
@@ -1626,12 +1760,22 @@ int main(int argc, char** argv) {
                         recentRow)]);
                 return true;
             }
+            if (overCwdRow) {
+                focusCwd();
+                clearProjectStatus();
+                requestCwdLaunch();
+                return true;
+            }
             if (overProjectList) {
                 focusProjects();
                 return true;
             }
             if (overRecentList && !recentMenuEntries.empty()) {
                 focusRecent();
+                return true;
+            }
+            if (overCwdList) {
+                focusCwd();
                 return true;
             }
             // Clicks on the quick-launch field belong to the Input component,
@@ -1759,7 +1903,8 @@ int main(int argc, char** argv) {
     auto handleMainEvent = [&](Event event) -> bool {
         // Mouse-wheel focus can land on a section that just became empty;
         // pull focus back to the project list.
-        if (focusIs(kMainFocusRecent) && recentMenuEntries.empty()) {
+        if ((focusIs(kMainFocusRecent) && recentMenuEntries.empty()) ||
+            (focusIs(kMainFocusCwd) && !cwdVisible)) {
             if (!setFocusNode(kMainFocusProjects)) {
                 mainFocus = 0;
             }
@@ -1841,7 +1986,8 @@ int main(int argc, char** argv) {
                 return true;
             }
         }
-        if (focusIs(kMainFocusRecent) && event == Event::Escape) {
+        if ((focusIs(kMainFocusRecent) || focusIs(kMainFocusCwd)) &&
+            event == Event::Escape) {
             if (!setFocusNode(kMainFocusProjects)) {
                 mainFocus = 0;
             }
@@ -1858,6 +2004,8 @@ int main(int argc, char** argv) {
                 focusedList = projectListComponent;
             } else if (focusIs(kMainFocusRecent)) {
                 focusedList = recentListComponent;
+            } else if (focusIs(kMainFocusCwd)) {
+                focusedList = cwdListComponent;
             }
 
             if (focusedList && focusedList->OnEvent(event)) {
@@ -1886,6 +2034,13 @@ int main(int argc, char** argv) {
         }
         if (eventMatchesAny(event, config.menuTheme.keys.quit)) {
             screen.Exit();
+            return true;
+        }
+        // E and Delete act on project-list rows. While the cwd section owns
+        // the focus they must not act on a stale mainSelected.
+        if (focusIs(kMainFocusCwd) &&
+            (eventMatchesAny(event, config.menuTheme.keys.projectMenu) ||
+             eventMatchesAny(event, config.menuTheme.keys.remove))) {
             return true;
         }
         if (eventMatchesAny(event,

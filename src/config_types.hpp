@@ -138,6 +138,8 @@ struct MenuTheme {
     std::string recentTitleFormat;
     std::string recentEntryFormat;
     std::string recentEmptyText;
+    std::string cwdTitleFormat;
+    std::string cwdEntryFormat;
     int recentLimit = 5;
     std::string projectNamePlaceholder;
     std::string quickInputLabel;

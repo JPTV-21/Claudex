@@ -704,3 +704,65 @@ TEST_CASE("screens/every default screen renders") {
         fixture.context));
     CHECK(contains(actions, "action-list"));
 }
+
+// --- cwd section ---------------------------------------------------------------
+
+TEST_CASE("screens/cwd conditions follow the cwd section availability") {
+    Fixture fixture;
+    CHECK_FALSE(blockConditionSatisfied(json{{"if", "cwd"}}, fixture.context));
+    CHECK(blockConditionSatisfied(json{{"if", "noCwd"}}, fixture.context));
+
+    fixture.context.hasCwdList = true;
+    CHECK(blockConditionSatisfied(json{{"if", "cwd"}}, fixture.context));
+    CHECK_FALSE(
+        blockConditionSatisfied(json{{"if", "noCwd"}}, fixture.context));
+}
+
+TEST_CASE("screens/cwdList renders its title and row when visible") {
+    Fixture fixture;
+    fixture.context.hasCwdList = true;
+    fixture.context.cwdPath = "F:/work";
+    fixture.context.cwdList = ftxui::text("F:/work");
+
+    const json blocks = json::array({{{"type", "cwdList"}}});
+    const std::string shown = renderBlocks(blocks, fixture.context);
+    CHECK(contains(shown, "Current folder"));
+    CHECK(contains(shown, "F:/work"));
+}
+
+TEST_CASE("screens/cwdList renders nothing when the section is hidden") {
+    Fixture fixture;
+    fixture.context.hasCwdList = false;
+    fixture.context.cwdList = ftxui::text("NOT SHOWN");
+
+    const json blocks = json::array({{{"type", "cwdList"}}});
+    const std::string shown = renderBlocks(blocks, fixture.context);
+    CHECK_FALSE(contains(shown, "NOT SHOWN"));
+    CHECK_FALSE(contains(shown, "Current folder"));
+}
+
+TEST_CASE("screens/cwd placeholder expands from the render context") {
+    Fixture fixture;
+    fixture.context.cwdPath = "F:/work";
+    CHECK_EQ(expandBlockText("{cwd}", fixture.context), "F:/work");
+}
+
+TEST_CASE("screens/the default main screen shows the cwd section") {
+    Fixture fixture;
+    fixture.context.hasCwdList = true;
+    fixture.context.cwdPath = "F:/work";
+    fixture.context.cwdList = ftxui::text("F:/work");
+    fixture.context.hasProjectList = true;
+    fixture.context.projectList = ftxui::text("F:/project");
+    fixture.context.hasQuickInput = true;
+    fixture.context.quickInput = ftxui::text("");
+    fixture.context.showAddProject = true;
+
+    const ScreenTheme& main =
+        screenThemeFor(fixture.config.menuTheme, "main");
+    const std::string shown =
+        renderBlocks(main.blocks, fixture.context);
+    CHECK(contains(shown, "Current folder"));
+    CHECK(contains(shown, "F:/work"));
+    CHECK(contains(shown, "F:/project"));
+}

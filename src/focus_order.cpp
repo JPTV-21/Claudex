@@ -61,6 +61,8 @@ void collectMainFocusOrderFrom(const json& blocks, std::vector<int>& order,
             node = kMainFocusRecent;
         } else if (type == "quickinput") {
             node = kMainFocusQuickInput;
+        } else if (type == "cwdlist") {
+            node = kMainFocusCwd;
         }
         if (node >= 0 && std::find(order.begin(), order.end(), node) ==
                              order.end()) {

@@ -38,6 +38,23 @@ bool matchesProject(const Project& project, const std::string& selector) {
            matchKey(project.name) == target;
 }
 
+// Main-screen node for a section, or -1 when the section lives on another
+// page. The focus order and availability are handled by the caller.
+int mainNodeForSection(FocusSection section) {
+    switch (section) {
+        case FocusSection::Projects:
+            return kMainFocusProjects;
+        case FocusSection::Recent:
+            return kMainFocusRecent;
+        case FocusSection::QuickInput:
+            return kMainFocusQuickInput;
+        case FocusSection::Cwd:
+            return kMainFocusCwd;
+        default:
+            return -1;
+    }
+}
+
 }  // namespace
 
 FocusSection focusSectionFromText(const std::string& spec) {
@@ -48,6 +65,10 @@ FocusSection focusSectionFromText(const std::string& spec) {
     }
     if (isOneOf(token, {"quickinput", "quicklaunch", "quick", "input"})) {
         return FocusSection::QuickInput;
+    }
+    if (isOneOf(token, {"cwd", "cwdlist", "currentfolder",
+                        "workingdirectory", "here"})) {
+        return FocusSection::Cwd;
     }
     if (isOneOf(token, {"actions", "action", "actionlist",
                         "projectactions", "projectmenu"})) {
@@ -117,7 +138,8 @@ const DefaultFocus* mainFocusTarget(
         const FocusSection section = focusSectionFromText(focus.section);
         if (section == FocusSection::Projects ||
             section == FocusSection::Recent ||
-            section == FocusSection::QuickInput) {
+            section == FocusSection::QuickInput ||
+            section == FocusSection::Cwd) {
             return &focus;
         }
     }
@@ -209,26 +231,11 @@ int actionFocusIndex(const std::vector<MenuAction>& actions,
     return resolveFocusRow(focus, static_cast<int>(actions.size()), matcher);
 }
 
-FocusChoice resolveDefaultFocus(const DefaultFocus& focus,
-                                const std::vector<int>& focusOrder,
-                                int projectEntries, int recentEntries,
-                                const std::vector<Project>& projects,
-                                const std::vector<int>& recentIndices) {
-    const FocusSection section = focusSectionFromText(focus.section);
-    // Actions and path fields live on other pages. They must not move the
-    // main-screen focus or borrow their item index there; the page they
-    // belong to applies the selector when it opens.
-    const bool mainSection = section == FocusSection::Projects ||
-                             section == FocusSection::Recent ||
-                             section == FocusSection::QuickInput;
-    const DefaultFocus effective = mainSection ? focus : DefaultFocus{};
-
-    const int requested =
-        section == FocusSection::Recent
-            ? kMainFocusRecent
-            : (section == FocusSection::QuickInput ? kMainFocusQuickInput
-                                                   : kMainFocusProjects);
-
+FocusChoice resolveDefaultFocus(
+    const std::vector<DefaultFocus>& targets,
+    const std::vector<int>& focusOrder, int projectEntries, int recentEntries,
+    bool cwdAvailable, const std::vector<Project>& projects,
+    const std::vector<int>& recentIndices) {
     const auto available = [&](int node) {
         if (focusIndexOf(focusOrder, node) < 0) {
             return false;
@@ -238,62 +245,87 @@ FocusChoice resolveDefaultFocus(const DefaultFocus& focus,
                 return projectEntries > 0;
             case kMainFocusRecent:
                 return recentEntries > 0;
+            case kMainFocusCwd:
+                return cwdAvailable;
             default:
-                return true;
+                return true;  // quickInput is always rendered.
         }
     };
 
-    int node = requested;
-    bool usedFallback = false;
-    if (!available(node)) {
-        bool found = false;
-        for (const int candidate : {kMainFocusProjects, kMainFocusRecent,
-                                    kMainFocusQuickInput}) {
-            if (available(candidate)) {
-                node = candidate;
-                found = true;
-                usedFallback = true;
-                break;
-            }
+    const auto itemFor = [&](const DefaultFocus& target, int node,
+                             bool fallback) {
+        if (node == kMainFocusProjects) {
+            // "add" targets the "+ Add project" row; it exists only when the
+            // project list has one more entry than the project array.
+            const auto projectMatcher = [&](const std::string& selector) {
+                const std::string key = matchKey(selector);
+                if (key == "add" || key == "addproject" || key == "+") {
+                    return projectEntries > static_cast<int>(projects.size())
+                               ? projectEntries - 1
+                               : -1;
+                }
+                return projectRowForMatch(projects, selector);
+            };
+            return fallback
+                       ? std::max(projectMatcher(target.match), 0)
+                       : resolveFocusRow(target, projectEntries,
+                                         projectMatcher);
         }
-        if (!found) {
-            return {};
+        if (node == kMainFocusRecent) {
+            return fallback
+                       ? std::max(recentRowForMatch(projects, recentIndices,
+                                                    target.match),
+                                  0)
+                       : resolveFocusRow(
+                             target, recentEntries,
+                             [&](const std::string& selector) {
+                                 return recentRowForMatch(projects,
+                                                          recentIndices,
+                                                          selector);
+                             });
         }
+        return 0;
+    };
+
+    // Remember the first configured main target for the identity fallback.
+    const DefaultFocus* fallbackSelector = nullptr;
+    for (const DefaultFocus& target : targets) {
+        const int node =
+            mainNodeForSection(focusSectionFromText(target.section));
+        if (node < 0) {
+            continue;  // Actions and path fields belong to other pages.
+        }
+        if (fallbackSelector == nullptr) {
+            fallbackSelector = &target;
+        }
+        if (!available(node)) {
+            continue;
+        }
+        return FocusChoice{node, itemFor(target, node, false)};
     }
 
-    FocusChoice choice;
-    choice.node = node;
-
-    if (node == kMainFocusProjects) {
-        // "add" targets the "+ Add project" row; it exists only when the
-        // project list has one more entry than the project array.
-        const auto projectMatcher = [&](const std::string& selector) {
-            const std::string key = matchKey(selector);
-            if (key == "add" || key == "addproject" || key == "+") {
-                return projectEntries > static_cast<int>(projects.size())
-                           ? projectEntries - 1
-                           : -1;
-            }
-            return projectRowForMatch(projects, selector);
-        };
-        choice.item =
-            usedFallback
-                ? std::max(projectMatcher(effective.match), 0)
-                : resolveFocusRow(effective, projectEntries, projectMatcher);
-    } else if (node == kMainFocusRecent) {
-        choice.item = usedFallback
-                          ? std::max(recentRowForMatch(
-                                         projects, recentIndices,
-                                         effective.match),
-                                     0)
-                          : resolveFocusRow(effective, recentEntries,
-                                            [&](const std::string& selector) {
-                                                return recentRowForMatch(
-                                                    projects, recentIndices,
-                                                    selector);
-                                            });
+    // No configured target is available: follow the theme's authored order.
+    for (const int node : focusOrder) {
+        if (!available(node)) {
+            continue;
+        }
+        if (fallbackSelector != nullptr &&
+            (node == kMainFocusProjects || node == kMainFocusRecent)) {
+            return FocusChoice{node, itemFor(*fallbackSelector, node, true)};
+        }
+        return FocusChoice{node, 0};
     }
-    return choice;
+    return {};
+}
+
+FocusChoice resolveDefaultFocus(const DefaultFocus& focus,
+                                const std::vector<int>& focusOrder,
+                                int projectEntries, int recentEntries,
+                                const std::vector<Project>& projects,
+                                const std::vector<int>& recentIndices) {
+    return resolveDefaultFocus(std::vector<DefaultFocus>{focus}, focusOrder,
+                               projectEntries, recentEntries, false, projects,
+                               recentIndices);
 }
 
 FocusChoice resolveDefaultFocus(const DefaultFocus& focus,
