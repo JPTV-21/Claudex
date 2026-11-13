@@ -67,7 +67,7 @@ Visual C++ Redistributable。
 ### 一步式便携安装
 
 安装脚本位于单独的仓库：
-**[JPTV-21/claude-code-portable](https://github.com/JPTV-21/claude-code-portable)**。
+**[windblood1667/claude-code-portable](https://github.com/windblood1667/claude-code-portable)**。
 
 它们会下载匹配的 ClaudeX 发布包、获取 Claude Code 二进制文件，并写入便携的
 `claudex-config.json`。Windows 可以使用 `setup-portable.ps1`（无需 Git）或

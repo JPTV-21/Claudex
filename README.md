@@ -71,7 +71,7 @@ Redistributable.
 ### One-step portable setup
 
 The setup scripts live in a separate repository:
-**[JPTV-21/claude-code-portable](https://github.com/JPTV-21/claude-code-portable)**.
+**[windblood1667/claude-code-portable](https://github.com/windblood1667/claude-code-portable)**.
 
 They download the matching ClaudeX release, fetch the Claude Code binary, and
 write a portable `claudex-config.json`. Windows can use `setup-portable.ps1`
